@@ -1,0 +1,6 @@
+{
+  "name": "Distribuidor de Dinero - Presupuesto Mensual Exacto",
+  "description": "Presupuestador financiero inteligente con cálculo exacto por días y semanas reales del mes, control de gastos fijos, metas de ahorro y distribución diaria.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
