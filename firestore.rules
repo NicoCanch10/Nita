@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 3. User root document
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && incoming().uid == userId;
+      allow update: if isOwner(userId) && isValidId(userId) && incoming().uid == userId;
+      allow delete: if isOwner(userId);
+
+      // Global Categories subcollection
+      match /categories/{docId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(docId) && incoming().userId == userId;
+        allow update: if isOwner(userId) && isValidId(docId) && incoming().userId == userId;
+        allow delete: if isOwner(userId);
+      }
+
+      // Monthly budget data subcollection
+      match /months/{monthKey} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(monthKey) && incoming().userId == userId;
+        allow update: if isOwner(userId) && isValidId(monthKey) && incoming().userId == userId;
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

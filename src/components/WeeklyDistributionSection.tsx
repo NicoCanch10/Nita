@@ -42,7 +42,9 @@ export const WeeklyDistributionSection: React.FC<WeeklyDistributionSectionProps>
           const isFuture = currentDay !== null && currentDay < week.startDay;
 
           const pctUsed = week.budget > 0 ? Math.min(100, Math.round((week.spent / week.budget) * 100)) : 0;
-          const isOverBudget = week.remaining < 0;
+          const roundedRemaining = Math.round(week.remaining * 100) / 100;
+          const isZeroBalance = Math.abs(roundedRemaining) === 0 && (week.spent > 0 || week.budget === 0);
+          const isOverBudget = roundedRemaining < -0.005 && !isZeroBalance;
 
           return (
             <div
@@ -125,6 +127,8 @@ export const WeeklyDistributionSection: React.FC<WeeklyDistributionSectionProps>
                       className={`h-full rounded-full transition-all duration-300 ${
                         isOverBudget
                           ? 'bg-rose-500'
+                          : isZeroBalance
+                          ? 'bg-amber-500'
                           : pctUsed > 80
                           ? 'bg-amber-500'
                           : 'bg-emerald-500'
@@ -137,11 +141,21 @@ export const WeeklyDistributionSection: React.FC<WeeklyDistributionSectionProps>
 
               {/* Footer: Remaining Balance */}
               <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-slate-500 text-2xs">
-                  {isOverBudget ? 'Excedido por:' : 'Disponible:'}
+                <span className={`text-2xs ${
+                  isOverBudget 
+                    ? 'text-rose-500' 
+                    : isZeroBalance 
+                    ? 'text-amber-600' 
+                    : 'text-slate-500'
+                }`}>
+                  {isOverBudget ? 'Excedido por:' : isZeroBalance ? 'Sin Saldo:' : 'Disponible:'}
                 </span>
                 <span className={`font-bold tabular-nums ${
-                  isOverBudget ? 'text-rose-600' : 'text-emerald-700'
+                  isOverBudget 
+                    ? 'text-rose-600' 
+                    : isZeroBalance 
+                    ? 'text-amber-600' 
+                    : 'text-emerald-700'
                 }`}>
                   {formatCurrency(Math.abs(week.remaining), currency)}
                 </span>

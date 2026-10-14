@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account profile and global financial preferences",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID matching the document ID"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the authenticated user"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name or alias"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Profile picture URL"
+        },
+        "currency": {
+          "type": "string",
+          "description": "Preferred primary currency code (e.g. ARS, USD)"
+        },
+        "language": {
+          "type": "string",
+          "description": "Selected UI language code (e.g. es, en, pt)"
+        },
+        "onboardingSeen": {
+          "type": "boolean",
+          "description": "Whether onboarding has been completed or acknowledged"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last profile update"
+        }
+      },
+      "required": ["uid"]
+    },
+    "CategoryList": {
+      "title": "CategoryList",
+      "description": "Global custom category list configured by the user",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID"
+        },
+        "categories": {
+          "type": "array",
+          "description": "Array of category definitions with ID, name, and color"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of update"
+        }
+      },
+      "required": ["userId", "categories"]
+    },
+    "MonthData": {
+      "title": "MonthData",
+      "description": "Detailed monthly financial data including income, fixed expenses and daily variable expenses",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID"
+        },
+        "monthKey": {
+          "type": "string",
+          "description": "Identifier formatted as YYYY-MM"
+        },
+        "year": {
+          "type": "number",
+          "description": "Gregorian year"
+        },
+        "month": {
+          "type": "number",
+          "description": "Month index 0 to 11"
+        },
+        "income": {
+          "type": "number",
+          "description": "Total monthly income"
+        },
+        "savingsRate": {
+          "type": "number",
+          "description": "Savings rate percentage"
+        },
+        "extraDaysPosition": {
+          "type": "string",
+          "description": "Positioning of extra days jar: start or end"
+        },
+        "categories": {
+          "type": "array",
+          "description": "Month-specific categories snapshot"
+        },
+        "fixedExpenses": {
+          "type": "array",
+          "description": "List of monthly fixed obligations"
+        },
+        "variableExpenses": {
+          "type": "array",
+          "description": "List of daily variable expenses and purchases"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of update"
+        }
+      },
+      "required": ["userId", "monthKey", "year", "month", "income"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile, default preferences and sync metadata"
+    },
+    "/users/{userId}/categories/global": {
+      "schema": "CategoryList",
+      "description": "Customized global budget categories and colors for the user"
+    },
+    "/users/{userId}/months/{monthKey}": {
+      "schema": "MonthData",
+      "description": "Financial month record containing income, savings, fixed expenses, and daily movements"
+    }
+  }
+}

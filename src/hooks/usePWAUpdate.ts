@@ -1,44 +1,173 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { registerSW } from 'virtual:pwa-register';
 
 export function usePWAUpdate() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [lastCheckMessage, setLastCheckMessage] = useState<string | null>(null);
+  const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const hasCheckedRef = useRef(false);
+
+  // Function to check if a new build/version is published on the server
+  const checkServerVersion = useCallback(async (registration?: ServiceWorkerRegistration | null) => {
+    try {
+      // 1. If Service Worker registration is present, ask it to check for updates
+      const reg = registration || registrationRef.current || (await navigator.serviceWorker?.getRegistration?.());
+      if (reg) {
+        registrationRef.current = reg;
+        reg.update().catch(() => {});
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          setUpdateAvailable(true);
+        }
+      }
+
+      // 2. Fetch the light version manifest bypassing all caches
+      const response = await fetch(`/version.json?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const currentBuildId = typeof __APP_BUILD_ID__ !== 'undefined' ? __APP_BUILD_ID__ : '';
+
+        // If the server has a different version published than what is currently running
+        if (data.version && currentBuildId && data.version !== currentBuildId) {
+          const lastReloadedVersion = sessionStorage.getItem('nita_last_reload_version');
+          if (lastReloadedVersion !== data.version) {
+            sessionStorage.setItem('nita_last_reload_version', data.version);
+            sessionStorage.setItem('nita_updated_notice', 'true');
+
+            // Force service worker update and skip waiting
+            if (reg?.waiting) {
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+
+            // Automatically reload the page so the user immediately gets the new published version
+            setTimeout(() => {
+              window.location.reload();
+            }, 300);
+            return true;
+          }
+        }
+      }
+    } catch {
+      // Offline or network error; gracefully continue with current cached version
+    }
+    return false;
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
       return;
     }
 
-    navigator.serviceWorker.ready.then((registration) => {
-      // Check periodically for updates (every 15 minutes)
-      const interval = setInterval(() => {
-        registration.update().catch(() => {});
-      }, 15 * 60 * 1000);
+    let isReloading = false;
+    const triggerAutoReload = () => {
+      if (!isReloading) {
+        isReloading = true;
+        sessionStorage.setItem('nita_updated_notice', 'true');
+        window.location.reload();
+      }
+    };
 
-      registration.addEventListener('updatefound', () => {
-        const newWorker = registration.installing;
-        if (newWorker) {
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              setUpdateAvailable(true);
+    // When the new Service Worker activates and takes control, reload automatically
+    navigator.serviceWorker.addEventListener('controllerchange', triggerAutoReload);
+
+    // Register Service Worker with autoUpdate via VitePWA
+    const updateSW = registerSW({
+      immediate: true,
+      onNeedReload() {
+        triggerAutoReload();
+      },
+      onRegisteredSW(_swScriptUrl, registration) {
+        if (registration) {
+          registrationRef.current = registration;
+
+          // Check immediately upon opening the application
+          if (!hasCheckedRef.current) {
+            hasCheckedRef.current = true;
+            checkServerVersion(registration);
+          }
+
+          // If a new worker is waiting, activate immediately
+          if (registration.waiting) {
+            setUpdateAvailable(true);
+            registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+
+          // Listen for new service worker installation
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed') {
+                  if (navigator.serviceWorker.controller) {
+                    setUpdateAvailable(true);
+                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                  }
+                }
+              });
             }
           });
         }
-      });
-
-      return () => clearInterval(interval);
+      },
+      onRegisterError(error) {
+        console.warn('[NITA PWA] Registration error:', error);
+      },
     });
 
-    let refreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!refreshing) {
-        refreshing = true;
-        window.location.reload();
+    // Automatically check for updates whenever the user opens or returns to the application
+    const handleAppResume = () => {
+      if (document.visibilityState === 'visible') {
+        checkServerVersion(registrationRef.current);
       }
-    });
-  }, []);
+    };
 
+    const handleWindowFocus = () => {
+      checkServerVersion(registrationRef.current);
+    };
+
+    const handlePageShow = () => {
+      checkServerVersion(registrationRef.current);
+    };
+
+    const handleOnline = () => {
+      checkServerVersion(registrationRef.current);
+    };
+
+    document.addEventListener('visibilitychange', handleAppResume);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('online', handleOnline);
+
+    // Periodic check every 3 minutes while the app remains open
+    const interval = setInterval(() => {
+      checkServerVersion(registrationRef.current);
+    }, 3 * 60 * 1000);
+
+    // Also run an immediate check on startup in case onRegisteredSW is delayed
+    const startupTimeout = setTimeout(() => {
+      checkServerVersion();
+    }, 1200);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(startupTimeout);
+      document.removeEventListener('visibilitychange', handleAppResume);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('online', handleOnline);
+      navigator.serviceWorker.removeEventListener('controllerchange', triggerAutoReload);
+      void updateSW;
+    };
+  }, [checkServerVersion]);
+
+  // Manual check triggered by user from Settings
   const checkForUpdate = useCallback(async () => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
       setLastCheckMessage('Actualización no soportada en este navegador');
@@ -49,24 +178,36 @@ export function usePWAUpdate() {
     setLastCheckMessage(null);
 
     try {
-      const registration = await navigator.serviceWorker.getRegistration();
-      if (registration) {
-        await registration.update();
-        if (registration.waiting) {
+      const reg = registrationRef.current || (await navigator.serviceWorker.getRegistration());
+      if (reg) {
+        registrationRef.current = reg;
+        await reg.update();
+
+        if (reg.waiting) {
           setUpdateAvailable(true);
-          setLastCheckMessage('¡Nueva versión encontrada! Lista para instalar.');
-        } else {
-          setLastCheckMessage('¡Ya cuentas con la última versión de NITA!');
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          setLastCheckMessage('¡Nueva versión encontrada! Actualizando...');
+          setTimeout(() => {
+            sessionStorage.setItem('nita_updated_notice', 'true');
+            window.location.reload();
+          }, 400);
+          return;
         }
+      }
+
+      // Check server version
+      const hasNewVersion = await checkServerVersion(reg);
+      if (hasNewVersion) {
+        setLastCheckMessage('¡Nueva versión encontrada! Actualizando NITA...');
       } else {
         setLastCheckMessage('¡Ya cuentas con la última versión de NITA!');
       }
-    } catch (err) {
+    } catch {
       setLastCheckMessage('Verificado correctamente');
     } finally {
       setIsChecking(false);
     }
-  }, []);
+  }, [checkServerVersion]);
 
   const applyUpdate = useCallback(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
@@ -74,13 +215,14 @@ export function usePWAUpdate() {
       return;
     }
 
-    navigator.serviceWorker.getRegistration().then((registration) => {
-      if (registration && registration.waiting) {
-        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-      } else {
-        window.location.reload();
-      }
-    });
+    const reg = registrationRef.current;
+    if (reg && reg.waiting) {
+      sessionStorage.setItem('nita_updated_notice', 'true');
+      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    } else {
+      sessionStorage.setItem('nita_updated_notice', 'true');
+      window.location.reload();
+    }
   }, []);
 
   return {

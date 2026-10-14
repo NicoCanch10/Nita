@@ -2,24 +2,15 @@ import { FixedExpense } from '../types/budget';
 
 export interface DueDateAlertSettings {
   enabled: boolean;
-  selectedDays: number[]; // e.g. [0, 3] (0 = mismo día, 1 = 1 día antes, 2 = 2 días antes, 3 = 3 días antes, 5 = 5 días antes, 7 = 7 días antes)
+  daysInAdvance: number; // Hasta 30 días antes (1 a 30)
 }
-
-export const ALERT_TIMING_OPTIONS = [
-  { days: 0, label: 'El mismo día' },
-  { days: 1, label: '1 día antes' },
-  { days: 2, label: '2 días antes' },
-  { days: 3, label: '3 días antes' },
-  { days: 5, label: '5 días antes' },
-  { days: 7, label: '7 días antes' },
-];
 
 export const DEFAULT_ALERT_SETTINGS: DueDateAlertSettings = {
   enabled: true,
-  selectedDays: [0, 3], // Default: el mismo día y 3 días antes (máximo 3)
+  daysInAdvance: 3, // Por defecto 3 días antes
 };
 
-const ALERT_SETTINGS_KEY = 'nita_alert_settings_v1';
+const ALERT_SETTINGS_KEY = 'nita_alert_settings_v2';
 
 export function loadAlertSettings(): DueDateAlertSettings {
   if (typeof window === 'undefined') return DEFAULT_ALERT_SETTINGS;
@@ -27,12 +18,24 @@ export function loadAlertSettings(): DueDateAlertSettings {
     const raw = localStorage.getItem(ALERT_SETTINGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (typeof parsed.enabled === 'boolean' && Array.isArray(parsed.selectedDays)) {
+      if (typeof parsed.enabled === 'boolean' && typeof parsed.daysInAdvance === 'number') {
         return {
           enabled: parsed.enabled,
-          selectedDays: parsed.selectedDays.slice(0, 3),
+          daysInAdvance: Math.min(30, Math.max(1, Math.round(parsed.daysInAdvance))),
         };
       }
+    }
+    // Check legacy v1 if exists
+    const legacy = localStorage.getItem('nita_alert_settings_v1');
+    if (legacy) {
+      const parsedLegacy = JSON.parse(legacy);
+      const days = Array.isArray(parsedLegacy.selectedDays) && parsedLegacy.selectedDays.length > 0
+        ? Math.max(...parsedLegacy.selectedDays.filter((d: number) => d > 0), 3)
+        : 3;
+      return {
+        enabled: parsedLegacy.enabled ?? true,
+        daysInAdvance: Math.min(30, Math.max(1, days)),
+      };
     }
   } catch (e) {
     console.error('Error loading alert settings', e);
@@ -43,16 +46,49 @@ export function loadAlertSettings(): DueDateAlertSettings {
 export function saveAlertSettings(settings: DueDateAlertSettings): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(
-      ALERT_SETTINGS_KEY,
-      JSON.stringify({
-        enabled: settings.enabled,
-        selectedDays: settings.selectedDays.slice(0, 3),
-      })
-    );
+    const sanitized: DueDateAlertSettings = {
+      enabled: Boolean(settings.enabled),
+      daysInAdvance: Math.min(30, Math.max(1, Math.round(settings.daysInAdvance || 1))),
+    };
+    localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(sanitized));
   } catch (e) {
     console.error('Error saving alert settings', e);
   }
+}
+
+export function getAlertSettingsDescription(settings: DueDateAlertSettings, language: string = 'es'): string {
+  if (!settings.enabled) {
+    if (language === 'ca') return 'Alertes de venciment desactivades';
+    if (language === 'pt') return 'Avisos de vencimento desativados';
+    if (language === 'fr') return 'Alertes d\'échéance désactivées';
+    if (language === 'it') return 'Avvisi di scadenza disattivati';
+    if (language === 'de') return 'Fälligkeitserinnerungen deaktiviert';
+    return language === 'es' ? 'Alertas de vencimiento desactivadas' : 'Due date alerts are disabled';
+  }
+  if (settings.daysInAdvance <= 0) {
+    if (language === 'ca') return 'Alertes el mateix dia del venciment';
+    if (language === 'pt') return 'Avisos no próprio dia do vencimento';
+    if (language === 'fr') return 'Alertes le jour même de l\'échéance';
+    if (language === 'it') return 'Avvisi il giorno stesso della scadenza';
+    if (language === 'de') return 'Erinnerungen am Fälligkeitstag';
+    return language === 'es' ? 'Alertas el mismo día del vencimiento' : 'Alerts on the due date';
+  }
+  if (settings.daysInAdvance === 1) {
+    if (language === 'ca') return 'Alertes 1 dia abans i el mateix dia';
+    if (language === 'pt') return 'Avisos 1 dia antes e no mesmo dia';
+    if (language === 'fr') return 'Alertes 1 jour avant et le jour même';
+    if (language === 'it') return 'Avvisi 1 giorno prima e il giorno stesso';
+    if (language === 'de') return 'Erinnerungen 1 Tag vorher und am Fälligkeitstag';
+    return language === 'es' ? 'Alertas 1 día antes y el mismo día' : 'Alerts 1 day before and on due date';
+  }
+  if (language === 'ca') return `Alertes ${settings.daysInAdvance} dies abans i el mateix dia`;
+  if (language === 'pt') return `Avisos ${settings.daysInAdvance} dias antes e no mesmo dia`;
+  if (language === 'fr') return `Alertes ${settings.daysInAdvance} jours avant et le jour même`;
+  if (language === 'it') return `Avvisi ${settings.daysInAdvance} giorni prima e il giorno stesso`;
+  if (language === 'de') return `Erinnerungen ${settings.daysInAdvance} Tage vorher und am Fälligkeitstag`;
+  return language === 'es'
+    ? `Alertas ${settings.daysInAdvance} días antes y el mismo día`
+    : `Alerts ${settings.daysInAdvance} days in advance and on due date`;
 }
 
 export interface ExpenseNotification {
@@ -68,19 +104,21 @@ export interface ExpenseNotification {
 
 /**
  * Calculates notifications for pending fixed expenses based on their due date
- * and the user's custom alert settings (up to 3 chosen timings).
+ * and the user's custom alert settings (up to 30 days in advance).
  */
 export function getExpenseNotifications(
   expenses: FixedExpense[],
   referenceDay?: number | null,
-  settings: DueDateAlertSettings = DEFAULT_ALERT_SETTINGS
+  settings: DueDateAlertSettings = DEFAULT_ALERT_SETTINGS,
+  language: string = 'es'
 ): ExpenseNotification[] {
-  if (!settings.enabled || settings.selectedDays.length === 0) {
+  if (!settings.enabled) {
     return [];
   }
 
   const today = new Date();
   const currentDay = referenceDay ?? today.getDate();
+  const daysInAdvance = Math.min(30, Math.max(1, settings.daysInAdvance));
 
   const notifications: ExpenseNotification[] = [];
 
@@ -89,44 +127,32 @@ export function getExpenseNotifications(
 
     const diff = expense.dueDate - currentDay;
 
-    // Check if difference matches one of the user's selected alert days
-    if (settings.selectedDays.includes(diff)) {
-      if (diff === 0) {
-        notifications.push({
-          expenseId: expense.id,
-          name: expense.name,
-          amount: expense.amount,
-          category: expense.category,
-          dueDate: expense.dueDate,
-          type: 'today',
-          daysLeft: 0,
-          message: '¡Vence hoy!',
-        });
-      } else if (diff === 3) {
-        notifications.push({
-          expenseId: expense.id,
-          name: expense.name,
-          amount: expense.amount,
-          category: expense.category,
-          dueDate: expense.dueDate,
-          type: 'in_3_days',
-          daysLeft: 3,
-          message: 'Vence en 3 días',
-        });
-      } else {
-        notifications.push({
-          expenseId: expense.id,
-          name: expense.name,
-          amount: expense.amount,
-          category: expense.category,
-          dueDate: expense.dueDate,
-          type: 'upcoming',
-          daysLeft: diff,
-          message: diff === 1 ? 'Vence mañana' : `Vence en ${diff} días`,
-        });
-      }
+    if (diff === 0) {
+      notifications.push({
+        expenseId: expense.id,
+        name: expense.name,
+        amount: expense.amount,
+        category: expense.category,
+        dueDate: expense.dueDate,
+        type: 'today',
+        daysLeft: 0,
+        message: language === 'es' ? '¡Vence hoy!' : 'Due today!',
+      });
+    } else if (diff > 0 && diff <= daysInAdvance) {
+      notifications.push({
+        expenseId: expense.id,
+        name: expense.name,
+        amount: expense.amount,
+        category: expense.category,
+        dueDate: expense.dueDate,
+        type: diff === 3 ? 'in_3_days' : 'upcoming',
+        daysLeft: diff,
+        message: language === 'es'
+          ? (diff === 1 ? 'Vence mañana' : `Vence en ${diff} días`)
+          : (diff === 1 ? 'Due tomorrow' : `Due in ${diff} days`),
+      });
     } else if (diff < 0) {
-      // Keep overdue notices for attention
+      // Overdue items
       notifications.push({
         expenseId: expense.id,
         name: expense.name,
@@ -135,12 +161,14 @@ export function getExpenseNotifications(
         dueDate: expense.dueDate,
         type: 'overdue',
         daysLeft: diff,
-        message: `Vencido hace ${Math.abs(diff)} día(s)`,
+        message: language === 'es' 
+          ? `Vencido hace ${Math.abs(diff)} día(s)`
+          : `Overdue by ${Math.abs(diff)} day(s)`,
       });
     }
   });
 
-  // Sort: today first, then in 3 days, upcoming, overdue
+  // Sort: today first, then closest upcoming, then overdue
   const priorityOrder: Record<string, number> = {
     today: 1,
     in_3_days: 2,
@@ -148,7 +176,12 @@ export function getExpenseNotifications(
     overdue: 4,
   };
 
-  return notifications.sort((a, b) => priorityOrder[a.type] - priorityOrder[b.type]);
+  return notifications.sort((a, b) => {
+    if (priorityOrder[a.type] !== priorityOrder[b.type]) {
+      return priorityOrder[a.type] - priorityOrder[b.type];
+    }
+    return a.daysLeft - b.daysLeft;
+  });
 }
 
 /**
@@ -196,11 +229,11 @@ export function checkAndNotifyBrowser(
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
+  const maxDays = Math.min(30, Math.max(1, settings.daysInAdvance));
 
   notifications.forEach((item) => {
-    // Only send browser alerts for items that match active user timings (excluding already past/overdue)
-    if (item.daysLeft < 0) return;
-    if (!settings.selectedDays.includes(item.daysLeft)) return;
+    // Only send browser alerts for pending items within configured days
+    if (item.daysLeft < 0 || item.daysLeft > maxDays) return;
 
     const storageKey = `nita_notif_${item.expenseId}_${item.daysLeft}_${todayStr}`;
     if (localStorage.getItem(storageKey)) {

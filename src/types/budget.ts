@@ -1,4 +1,27 @@
-export type CurrencyCode = 'ARS' | 'USD' | 'EUR' | 'MXN' | 'COP' | 'CLP' | 'PEN';
+export type CurrencyCode =
+  | 'ARS'
+  | 'USD'
+  | 'EUR'
+  | 'MXN'
+  | 'COP'
+  | 'CLP'
+  | 'PEN'
+  | 'BOB'
+  | 'BRL'
+  | 'CRC'
+  | 'CUP'
+  | 'DOP'
+  | 'GTQ'
+  | 'HNL'
+  | 'HTG'
+  | 'NIO'
+  | 'PAB'
+  | 'PYG'
+  | 'UYU'
+  | 'VES'
+  | 'BZD'
+  | 'GYD'
+  | 'SRD';
 
 export interface CurrencyConfig {
   code: CurrencyCode;
@@ -65,7 +88,7 @@ export interface MonthCalculationDetails {
 
 export interface Frasco {
   number: number; // 1 to 5
-  title: string; // "Frasco Nº 1: Días Extras", "Frasco Nº 2: Semana 1", etc.
+  title: string; // "Días Extras", "Semana 1", "Semana 2", etc.
   subtitle: string; // "Días 29 al 31 (3 días)", "Días 1 al 7 (7 días)"
   startDay: number;
   endDay: number;
@@ -75,6 +98,8 @@ export interface Frasco {
   spent: number; // consumos registrados en este período
   remaining: number; // amount - spent
   isExtraDaysJar: boolean;
+  adjustment?: number; // Ajuste por redistribución (+ por exceso propio o - por redistribución)
+  baseAmount?: number; // Monto base previo al ajuste
 }
 
 export interface FiveJarsCalculation {
@@ -97,6 +122,14 @@ export interface MonthData {
   categories: CategoryInfo[];
   fixedExpenses: FixedExpense[];
   variableExpenses: VariableExpense[];
+  jarAdjustments?: Record<number, number>; // Ajustes específicos por número de frasco (1..5)
+  lastJarAdjustmentLog?: {
+    date: string;
+    exceededJarTitle: string;
+    diff: number;
+    transferredToNextMonth?: boolean;
+    nextMonthKey?: string;
+  };
 }
 
 export interface BudgetState {

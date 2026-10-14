@@ -6,6 +6,7 @@ import {
   DEFAULT_ALERT_SETTINGS 
 } from '../utils/notifications';
 import { formatCurrency } from '../utils/currency';
+import { getTranslations } from '../utils/languages';
 import { AlertCircle, Clock, X, CheckCircle2 } from 'lucide-react';
 
 interface DueAlertBannerProps {
@@ -14,6 +15,7 @@ interface DueAlertBannerProps {
   currentDay: number | null;
   onTogglePaid: (expenseId: string) => void;
   alertSettings?: DueDateAlertSettings;
+  language?: string;
 }
 
 export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
@@ -22,7 +24,9 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
   currentDay,
   onTogglePaid,
   alertSettings = DEFAULT_ALERT_SETTINGS,
+  language = 'es',
 }) => {
+  const t = getTranslations(language);
   const [isDismissed, setIsDismissed] = useState(false);
 
   // If user disabled alerts in settings or dismissed banner
@@ -30,7 +34,7 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
     return null;
   }
 
-  const notifications = getExpenseNotifications(expenses, currentDay, alertSettings);
+  const notifications = getExpenseNotifications(expenses, currentDay, alertSettings, language);
   // Critical notifications to alert for in banner (items matching active timings or overdue)
   const critical = notifications.filter(
     n => n.type === 'today' || n.type === 'in_3_days' || n.type === 'upcoming'
@@ -51,8 +55,8 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
         type="button"
         onClick={() => setIsDismissed(true)}
         className="absolute top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 text-amber-800/60 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 p-1.5 rounded-xl hover:bg-amber-100/60 dark:hover:bg-amber-900/40 transition-colors cursor-pointer z-10"
-        title="Ocultar aviso"
-        aria-label="Cerrar aviso"
+        title={t.dismissAlert}
+        aria-label={t.dismissAlert}
       >
         <X className="w-4 h-4" />
       </button>
@@ -67,10 +71,10 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
         <div className="flex-1 min-w-0 w-full text-center sm:text-left pr-0 sm:pr-8">
           <h4 className="font-black text-amber-950 dark:text-amber-200 text-xs sm:text-sm leading-snug">
             {todayCount > 0 && advanceCount > 0
-              ? `¡Atención! Tienes ${todayCount} gasto(s) que vence(n) hoy y ${advanceCount} con vencimiento próximo`
+              ? t.alertDueBothTitle.replace('{today}', String(todayCount)).replace('{advance}', String(advanceCount))
               : todayCount > 0
-              ? `¡Atención! Tienes ${todayCount} gasto(s) fijo(s) que vence(n) HOY`
-              : `Aviso preventivo: Tienes ${advanceCount} gasto(s) con vencimiento próximo`}
+              ? t.alertDueTodayTitle.replace('{count}', String(todayCount))
+              : t.alertDueSoonTitle.replace('{count}', String(advanceCount))}
           </h4>
 
           {/* Alert items badges: perfectly centered on mobile */}
@@ -88,17 +92,17 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
                   <Clock className="w-3.5 h-3.5 shrink-0" />
                   <span className="font-extrabold break-words">{item.name}:</span>
                   <span className="tabular-nums font-black whitespace-nowrap">{formatCurrency(item.amount, currency)}</span>
-                  <span className="text-3xs font-semibold opacity-85 whitespace-nowrap">({item.message})</span>
+                  <span className="text-3xs font-semibold opacity-85 whitespace-nowrap">({item.type === 'today' ? t.dueTodayNotice : t.daysBeforeDue.replace('{days}', String(item.daysLeft))})</span>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => onTogglePaid(item.expenseId)}
-                  title="Marcar como pagado"
+                  title={t.markPaid}
                   className="w-full sm:w-auto px-2.5 py-1 sm:py-0.5 mt-1 sm:mt-0 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-300 cursor-pointer font-black text-3xs uppercase tracking-wider border border-emerald-300/80 dark:border-emerald-700/80 shadow-2xs flex items-center justify-center gap-1 transition-colors"
                 >
                   <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                  <span>Marcar Pagado</span>
+                  <span>{t.markPaidBtn}</span>
                 </button>
               </div>
             ))}
