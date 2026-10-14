@@ -252,3 +252,106 @@ export function checkAndNotifyBrowser(
     localStorage.setItem(storageKey, 'true');
   });
 }
+
+const DISMISSED_PREVENTIVE_KEY = 'nita_dismissed_preventive_alerts_v1';
+
+export interface DismissedPreventiveRecord {
+  expenseId: string;
+  dueDate: number;
+  year: number;
+  month: number;
+  dismissedAt: string;
+}
+
+export function loadDismissedPreventiveAlerts(): Record<string, DismissedPreventiveRecord> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(DISMISSED_PREVENTIVE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) || {};
+  } catch (e) {
+    console.error('Error loading dismissed preventive alerts', e);
+    return {};
+  }
+}
+
+/**
+ * Checks if a preventive (advance) alert was dismissed by the user for a specific expense, due date, year and month.
+ */
+export function isPreventiveAlertDismissed(
+  expenseId: string,
+  dueDate: number,
+  year: number,
+  month: number
+): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const alerts = loadDismissedPreventiveAlerts();
+    const key = `${year}_${month}_${expenseId}_due_${dueDate}`;
+    return Boolean(alerts[key]);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Marks a preventive alert as dismissed until the actual due date arrives.
+ */
+export function dismissPreventiveAlert(
+  expenseId: string,
+  dueDate: number,
+  year: number,
+  month: number
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const alerts = loadDismissedPreventiveAlerts();
+    const key = `${year}_${month}_${expenseId}_due_${dueDate}`;
+    alerts[key] = {
+      expenseId,
+      dueDate,
+      year,
+      month,
+      dismissedAt: new Date().toISOString(),
+    };
+
+    // Prune entries older than 90 days to keep storage lean
+    const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    const cleaned: Record<string, DismissedPreventiveRecord> = {};
+    for (const [k, v] of Object.entries(alerts)) {
+      if (v.dismissedAt && new Date(v.dismissedAt).getTime() > ninetyDaysAgo) {
+        cleaned[k] = v;
+      }
+    }
+
+    localStorage.setItem(DISMISSED_PREVENTIVE_KEY, JSON.stringify(cleaned));
+  } catch (e) {
+    console.error('Error saving dismissed preventive alert', e);
+  }
+}
+
+/**
+ * Clears any dismissed status for an expense in a given month.
+ */
+export function clearDismissedPreventiveAlert(
+  expenseId: string,
+  year: number,
+  month: number
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const alerts = loadDismissedPreventiveAlerts();
+    let changed = false;
+    for (const k of Object.keys(alerts)) {
+      if (k.startsWith(`${year}_${month}_${expenseId}`)) {
+        delete alerts[k];
+        changed = true;
+      }
+    }
+    if (changed) {
+      localStorage.setItem(DISMISSED_PREVENTIVE_KEY, JSON.stringify(alerts));
+    }
+  } catch (e) {
+    console.error('Error clearing dismissed preventive alert', e);
+  }
+}

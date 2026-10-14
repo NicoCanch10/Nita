@@ -32,7 +32,9 @@ interface HeaderProps {
   onApplyUpdate?: () => void;
   onCheckForUpdate?: () => void;
   isCheckingUpdate?: boolean;
+  isUpdating?: boolean;
   lastUpdateMessage?: string | null;
+  onForceCleanReload?: () => void;
   onMonthChange: (month: number) => void;
   onYearChange: (year: number) => void;
   onCurrencyChange: (currency: CurrencyCode) => void;
@@ -60,7 +62,9 @@ export const Header: React.FC<HeaderProps> = ({
   onApplyUpdate,
   onCheckForUpdate,
   isCheckingUpdate,
+  isUpdating,
   lastUpdateMessage,
+  onForceCleanReload,
   onMonthChange,
   onYearChange,
   onCurrencyChange,
@@ -226,7 +230,9 @@ export const Header: React.FC<HeaderProps> = ({
               onApplyUpdate={onApplyUpdate}
               onCheckForUpdate={onCheckForUpdate}
               isCheckingUpdate={isCheckingUpdate}
+              isUpdating={isUpdating}
               lastUpdateMessage={lastUpdateMessage}
+              onForceCleanReload={onForceCleanReload}
             />
 
           </div>

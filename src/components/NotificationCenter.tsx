@@ -198,7 +198,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                         )}
 
                         <span
-                          className="px-1.5 py-0.5 rounded text-2xs font-bold"
+                          className="px-1.5 py-0.5 rounded text-[10px] leading-tight font-bold"
                           style={{
                             backgroundColor: `${cat.color}15`,
                             color: cat.color,

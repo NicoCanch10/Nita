@@ -3,7 +3,9 @@ import { FixedExpense, CurrencyCode } from '../types/budget';
 import { 
   getExpenseNotifications, 
   DueDateAlertSettings, 
-  DEFAULT_ALERT_SETTINGS 
+  DEFAULT_ALERT_SETTINGS,
+  isPreventiveAlertDismissed,
+  dismissPreventiveAlert
 } from '../utils/notifications';
 import { formatCurrency } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
@@ -16,6 +18,8 @@ interface DueAlertBannerProps {
   onTogglePaid: (expenseId: string) => void;
   alertSettings?: DueDateAlertSettings;
   language?: string;
+  year?: number;
+  month?: number;
 }
 
 export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
@@ -25,20 +29,40 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
   onTogglePaid,
   alertSettings = DEFAULT_ALERT_SETTINGS,
   language = 'es',
+  year,
+  month,
 }) => {
   const t = getTranslations(language);
-  const [isDismissed, setIsDismissed] = useState(false);
+  const [isDismissedSession, setIsDismissedSession] = useState(false);
 
-  // If user disabled alerts in settings or dismissed banner
-  if (!alertSettings.enabled || isDismissed) {
+  const now = new Date();
+  const activeYear = year ?? now.getFullYear();
+  const activeMonth = month ?? (now.getMonth() + 1);
+  const activeDay = currentDay ?? now.getDate();
+
+  // If user disabled alerts in settings or dismissed in current session
+  if (!alertSettings.enabled || isDismissedSession) {
     return null;
   }
 
-  const notifications = getExpenseNotifications(expenses, currentDay, alertSettings, language);
-  // Critical notifications to alert for in banner (items matching active timings or overdue)
-  const critical = notifications.filter(
-    n => n.type === 'today' || n.type === 'in_3_days' || n.type === 'upcoming'
-  );
+  const allNotifications = getExpenseNotifications(expenses, activeDay, alertSettings, language);
+  
+  // Critical notifications to alert for in banner:
+  // - n.type === 'today': Due today (always shown, NOT filtered by preventive dismissal because due date has arrived)
+  // - n.type !== 'today': Preventive / advance notice (filtered out if user dismissed it until due date)
+  const critical = allNotifications.filter(n => {
+    if (n.type === 'today') {
+      return true;
+    }
+    if (n.type === 'in_3_days' || n.type === 'upcoming') {
+      // Check if user previously closed the preventive notice for this expense
+      if (isPreventiveAlertDismissed(n.expenseId, n.dueDate, activeYear, activeMonth)) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  });
 
   if (critical.length === 0) {
     return null;
@@ -47,13 +71,24 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
   const todayCount = critical.filter(n => n.type === 'today').length;
   const advanceCount = critical.filter(n => n.type !== 'today').length;
 
+  const handleDismissBanner = () => {
+    // When closed from the X:
+    // Remember any preventive notice so that it won't appear again until the day of the due date
+    const advanceItems = critical.filter(n => n.type === 'in_3_days' || n.type === 'upcoming');
+    advanceItems.forEach(item => {
+      dismissPreventiveAlert(item.expenseId, item.dueDate, activeYear, activeMonth);
+    });
+
+    setIsDismissedSession(true);
+  };
+
   return (
     <div className="relative bg-amber-50/95 dark:bg-amber-950/40 border border-amber-200/90 dark:border-amber-900/60 rounded-3xl p-4 sm:p-5 shadow-xs animate-in fade-in duration-200 w-full transition-colors text-center sm:text-left overflow-hidden mx-auto">
       
       {/* Dismiss Button positioned top right so it never pulls banner content off-center */}
       <button
         type="button"
-        onClick={() => setIsDismissed(true)}
+        onClick={handleDismissBanner}
         className="absolute top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 text-amber-800/60 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 p-1.5 rounded-xl hover:bg-amber-100/60 dark:hover:bg-amber-900/40 transition-colors cursor-pointer z-10"
         title={t.dismissAlert}
         aria-label={t.dismissAlert}

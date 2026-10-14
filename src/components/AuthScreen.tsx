@@ -1,19 +1,16 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { AlertCircle, Loader2, UserX, Info, X, ShieldAlert, WifiOff, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, Loader2, UserX, WifiOff, CheckCircle2 } from 'lucide-react';
 
 export const AuthScreen: React.FC = () => {
   const { 
     signInWithGoogle, 
-    signInWithApple, 
     continueWithoutAccount, 
     authError, 
     clearAuthError,
     isOnline
   } = useAuth();
   const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
-  const [isSigningInApple, setIsSigningInApple] = useState(false);
-  const [showAppleInfo, setShowAppleInfo] = useState(false);
 
   const handleGoogleSignIn = async () => {
     try {
@@ -27,25 +24,7 @@ export const AuthScreen: React.FC = () => {
     }
   };
 
-  const handleAppleSignIn = async () => {
-    try {
-      setIsSigningInApple(true);
-      clearAuthError();
-      await signInWithApple();
-    } catch (err: unknown) {
-      const errorObj = err as { code?: string; message?: string };
-      if (errorObj?.code === 'popup-closed') {
-        // User closed the popup, silently reset
-        return;
-      }
-      // For any unconfigured provider or Apple setup error, show the informative modal instead of an error cartel!
-      setShowAppleInfo(true);
-    } finally {
-      setIsSigningInApple(false);
-    }
-  };
-
-  const isBusy = isSigningInGoogle || isSigningInApple;
+  const isBusy = isSigningInGoogle;
 
   return (
     <div className="min-h-screen w-full bg-slate-50 dark:bg-slate-950 flex flex-col justify-center items-center p-4 sm:p-6 transition-colors duration-200">
@@ -78,7 +57,7 @@ export const AuthScreen: React.FC = () => {
         </div>
 
         {/* Error Alert */}
-        {authError && !authError.toLowerCase().includes('apple') && (
+        {authError && (
           <div className="w-full mb-5 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-300 animate-in fade-in duration-200">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
             <div className="flex-1 leading-snug">
@@ -132,33 +111,6 @@ export const AuthScreen: React.FC = () => {
             <span>{isSigningInGoogle ? 'Iniciando sesión...' : 'Continuar con Google'}</span>
           </button>
 
-          {/* Continuar con Apple */}
-          <div className="relative w-full">
-            <button
-              type="button"
-              onClick={handleAppleSignIn}
-              disabled={isBusy}
-              className="w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-xl border border-slate-900 dark:border-white bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-semibold text-sm transition-all shadow-sm active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
-            >
-              {isSigningInApple ? (
-                <Loader2 className="w-5 h-5 animate-spin text-white dark:text-slate-900" />
-              ) : (
-                <svg className="w-5 h-5 shrink-0 fill-current" viewBox="0 0 24 24">
-                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.87c.66-.82 1.11-1.96.99-3.1-.96.04-2.12.64-2.8 1.44-.6.69-1.12 1.84-.98 2.95 1.07.08 2.13-.47 2.79-1.29z" />
-                </svg>
-              )}
-              <span>{isSigningInApple ? 'Iniciando sesión...' : 'Continuar con Apple'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAppleInfo(true)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-slate-400 hover:text-white dark:hover:text-slate-900 transition-colors"
-              title="Información y estado de Apple Sign-In"
-            >
-              <Info className="w-4 h-4" />
-            </button>
-          </div>
-
           {/* Divisor */}
           <div className="relative my-1.5 flex items-center justify-center w-full">
             <div className="w-full border-t border-slate-200 dark:border-slate-800" />
@@ -197,94 +149,9 @@ export const AuthScreen: React.FC = () => {
           <p className="font-bold text-slate-700 dark:text-slate-300 mb-0.5">
             ¿Usas NITA sin cuenta?
           </p>
-          Tus datos se guardarán de forma privada en este navegador. Si luego deseas sincronizar entre tu computadora y celular, podrás iniciar sesión con Google o Apple sin perder tu información.
+          Tus datos se guardarán de forma privada en este navegador. Si luego deseas sincronizar entre tu computadora y celular, podrás iniciar sesión con Google sin perder tu información.
         </div>
       </div>
-
-      {/* Modal Informativo: Estado de Apple Sign-In */}
-      {showAppleInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative text-left">
-            <button
-              type="button"
-              onClick={() => setShowAppleInfo(false)}
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                <svg className="w-5 h-5 fill-current text-slate-900 dark:text-white" viewBox="0 0 24 24">
-                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.87c.66-.82 1.11-1.96.99-3.1-.96.04-2.12.64-2.8 1.44-.6.69-1.12 1.84-.98 2.95 1.07.08 2.13-.47 2.79-1.29z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Estado de Apple Sign-In
-                </h3>
-                <span className="inline-flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
-                  <ShieldAlert className="w-3 h-3" /> Requiere membresía Apple Developer
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              <p>
-                <strong>¿Ya es posible ingresar con Apple?</strong>
-                <br />
-                A nivel de programación, la aplicación ya tiene el código y el SDK de Firebase listos para Apple. Sin embargo, para que Apple acepte el inicio de sesión, Apple exige credenciales oficiales de una cuenta de desarrollador paga en el <strong>Apple Developer Program ($99 USD/año)</strong>.
-              </p>
-
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 text-2xs space-y-1.5">
-                <p className="font-bold text-slate-800 dark:text-slate-200">
-                  Datos requeridos en la consola de Firebase Authentication:
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-slate-600 dark:text-slate-400">
-                  <li><strong>Services ID:</strong> Identificador creado en developer.apple.com.</li>
-                  <li><strong>Apple Team ID:</strong> ID de tu equipo Apple Developer (10 caracteres).</li>
-                  <li><strong>Key ID:</strong> Identificador de la clave privada de Sign in with Apple.</li>
-                  <li><strong>Clave Privada (.p8):</strong> Archivo de clave descargado de Apple.</li>
-                </ul>
-              </div>
-
-              <p className="text-2xs text-slate-500 dark:text-slate-400">
-                Mientras tanto, puedes utilizar <strong>Continuar con Google</strong> (que ya está 100% activo y sincronizado en tiempo real) o <strong>Ingresar sin cuenta</strong>.
-              </p>
-            </div>
-
-            <div className="mt-5 pt-3 border-t border-slate-150 dark:border-slate-800 flex flex-col sm:flex-row gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAppleInfo(false);
-                  handleGoogleSignIn();
-                }}
-                className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-98"
-              >
-                <span>Usar Google ahora</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAppleInfo(false);
-                  continueWithoutAccount();
-                }}
-                className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all cursor-pointer active:scale-98"
-              >
-                <span>Ingresar sin cuenta</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAppleInfo(false)}
-                className="px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-medium transition-colors cursor-pointer"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

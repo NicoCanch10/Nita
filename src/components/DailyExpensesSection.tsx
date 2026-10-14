@@ -306,7 +306,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                     </p>
                     <div className="flex items-center gap-2 text-2xs text-slate-500 dark:text-slate-400 mt-0.5 flex-wrap">
                       <span 
-                        className="font-semibold px-2 py-0.5 rounded-md text-2xs border inline-flex items-center gap-1"
+                        className="font-semibold px-1.5 py-0.5 rounded-md text-[10px] leading-tight border inline-flex items-center gap-1"
                         style={{
                           backgroundColor: `${cat.color}15`,
                           color: cat.color,
@@ -314,7 +314,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                         }}
                       >
                         <span 
-                          className="w-1.5 h-1.5 rounded-full"
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
                           style={{ backgroundColor: cat.color }}
                         />
                         {cat.label}

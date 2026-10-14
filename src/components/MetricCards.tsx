@@ -110,7 +110,6 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
 
   const fixedExpensesPercentage = income > 0 ? ((totalFixedExpenses / income) * 100).toFixed(1) : '0';
   const remainingPercentage = income > 0 ? ((monthlyRemaining / income) * 100).toFixed(1) : '0';
-  const variableSpentRemaining = monthlyRemaining - totalVariableSpent;
 
   // Pace calculation if currently in this month
   const targetSpentToDate = currentDay ? calcDetails.dailyBaseBudget * currentDay : null;
@@ -313,7 +312,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
 
         {/* Real Month Pace Alert (if current month is active) */}
         {currentDay && (
-          <div className="flex items-center gap-2.5 sm:gap-3 text-xs flex-wrap sm:flex-nowrap justify-between sm:justify-end pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5 sm:gap-3 text-xs justify-start sm:justify-end pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-1.5">
               {isAheadOfPace ? (
                 <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-lg">
@@ -326,13 +325,6 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                   {t.paceHighLabel}
                 </span>
               )}
-            </div>
-
-            <div className="text-right text-slate-500 dark:text-slate-400">
-              <span className="text-2xs block uppercase">{t.variableBalanceLabel}</span>
-              <span className={`font-black tabular-nums ${variableSpentRemaining < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>
-                {formatCurrency(variableSpentRemaining, currency)}
-              </span>
             </div>
           </div>
         )}

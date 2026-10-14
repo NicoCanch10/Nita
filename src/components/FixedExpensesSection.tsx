@@ -382,7 +382,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                     <div className="flex items-center gap-2 text-2xs text-slate-500 dark:text-slate-400 mt-0.5 flex-wrap">
                       {/* Dynamic Category Badge with custom color */}
                       <span 
-                        className="inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-md border"
+                        className="inline-flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded-md border text-[10px] leading-tight shrink-0"
                         style={{ 
                           backgroundColor: `${cat.color}15`, 
                           color: cat.color,
@@ -390,7 +390,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                         }}
                       >
                         <span 
-                          className="w-1.5 h-1.5 rounded-full"
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
                           style={{ backgroundColor: cat.color }}
                         />
                         {cat.label}
@@ -413,68 +413,78 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
 
                 {/* Amount, inline edit, and actions */}
                 {editingExpenseId === expense.id ? (
-                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 bg-slate-50 dark:bg-slate-800/90 p-1.5 rounded-2xl border border-blue-300 dark:border-blue-700">
-                    <div className="flex items-center gap-1">
-                      <span className="text-2xs text-slate-400 font-bold">$</span>
-                      <input
-                        type="number"
-                        min="0.01"
-                        step="any"
-                        value={editAmount}
-                        onChange={(e) => setEditAmount(e.target.value)}
-                        placeholder="Monto"
-                        className="w-20 sm:w-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-white font-bold tabular-nums focus:outline-hidden focus:border-blue-500"
-                        title="Modificar valor"
-                        autoFocus
-                      />
-                    </div>
+                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 bg-slate-50 dark:bg-slate-800/90 p-1.5 sm:p-2 rounded-xl border border-blue-300 dark:border-blue-700 shadow-xs">
+                    {/* Modificar importe arriba, vencimiento abajo */}
+                    <div className="flex flex-col gap-1.5">
+                      {/* Modificar importe (arriba) */}
+                      <div className="flex items-center gap-1">
+                        <span className="text-2xs text-slate-400 font-bold w-3.5 text-center shrink-0">$</span>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="any"
+                          value={editAmount}
+                          onChange={(e) => setEditAmount(e.target.value)}
+                          placeholder="Monto"
+                          className="w-20 sm:w-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5 sm:py-1 text-xs text-slate-900 dark:text-white font-bold tabular-nums focus:outline-hidden focus:border-blue-500"
+                          title="Modificar importe"
+                          autoFocus
+                        />
+                      </div>
 
-                    <div className="flex items-center gap-1">
-                      <span className="text-2xs text-slate-400 font-semibold hidden xs:inline">{t.dueDayShort}:</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max={daysInMonth}
-                        value={editDueDate}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === '') {
-                            setEditDueDate('');
-                            return;
-                          }
-                          const num = parseInt(val, 10);
-                          if (!isNaN(num)) {
-                            if (num > daysInMonth) {
-                              setEditDueDate(String(daysInMonth));
-                            } else if (num < 1) {
-                              setEditDueDate('1');
-                            } else {
-                              setEditDueDate(val);
+                      {/* Modificar vencimiento (abajo) */}
+                      <div className="flex items-center gap-1">
+                        <span className="flex items-center justify-center w-3.5 shrink-0" title={t.dueDayShort}>
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          max={daysInMonth}
+                          value={editDueDate}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setEditDueDate('');
+                              return;
                             }
-                          }
-                        }}
-                        placeholder={`1-${daysInMonth}`}
-                        className="w-14 sm:w-16 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-1.5 py-1 text-xs text-slate-900 dark:text-white font-bold text-center tabular-nums focus:outline-hidden focus:border-blue-500"
-                        title={t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)}
-                      />
+                            const num = parseInt(val, 10);
+                            if (!isNaN(num)) {
+                              if (num > daysInMonth) {
+                                setEditDueDate(String(daysInMonth));
+                              } else if (num < 1) {
+                                setEditDueDate('1');
+                              } else {
+                                setEditDueDate(val);
+                              }
+                            }
+                          }}
+                          placeholder={`Vto: 1-${daysInMonth}`}
+                          className="w-20 sm:w-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-1.5 py-0.5 sm:py-1 text-xs text-slate-900 dark:text-white font-bold text-center tabular-nums focus:outline-hidden focus:border-blue-500"
+                          title={t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)}
+                        />
+                      </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleSaveEditExpense(expense.id)}
-                      title="Guardar cambios"
-                      className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelEditExpense}
-                      title="Cancelar edición"
-                      className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer shrink-0"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Botones de acción (Guardar y Cancelar) */}
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEditExpense(expense.id)}
+                        title="Guardar cambios"
+                        className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs flex items-center justify-center"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelEditExpense}
+                        title="Cancelar edición"
+                        className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">

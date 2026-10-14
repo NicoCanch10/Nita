@@ -53,7 +53,9 @@ interface SettingsMenuProps {
   onApplyUpdate?: () => void;
   onCheckForUpdate?: () => void;
   isCheckingUpdate?: boolean;
+  isUpdating?: boolean;
   lastUpdateMessage?: string | null;
+  onForceCleanReload?: () => void;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
@@ -72,7 +74,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onApplyUpdate,
   onCheckForUpdate,
   isCheckingUpdate = false,
+  isUpdating = false,
   lastUpdateMessage = null,
+  onForceCleanReload,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -476,7 +480,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               {updateAvailable ? (
                 <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 space-y-2">
                   <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-200 font-bold text-xs">
-                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                    <Sparkles className="w-4 h-4 text-emerald-600 animate-pulse" />
                     <span>{t.newVersionAvailable}</span>
                   </div>
                   <button
@@ -484,9 +488,20 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     onClick={() => {
                       if (onApplyUpdate) onApplyUpdate();
                     }}
-                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl transition-colors cursor-pointer text-xs shadow-xs"
+                    disabled={isUpdating}
+                    className="w-full min-h-[44px] py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 active:scale-[0.98] disabled:opacity-75 disabled:cursor-not-allowed text-white font-extrabold rounded-xl transition-all cursor-pointer text-xs shadow-xs touch-manipulation select-none flex items-center justify-center gap-2"
                   >
-                    {t.updateNowBtn}
+                    {isUpdating ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                        <span>Actualizando NITA...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 text-emerald-200" />
+                        <span>{t.updateNowBtn}</span>
+                      </>
+                    )}
                   </button>
                 </div>
               ) : (
@@ -496,21 +511,31 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     onClick={() => {
                       if (onCheckForUpdate) onCheckForUpdate();
                     }}
-                    disabled={isCheckingUpdate}
-                    className="w-full flex items-center justify-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-2xs transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+                    disabled={isCheckingUpdate || isUpdating}
+                    className="w-full min-h-[44px] flex items-center justify-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 active:bg-slate-200 dark:active:bg-slate-700 active:scale-[0.98] disabled:opacity-75 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 rounded-xl font-bold text-2xs sm:text-xs transition-all cursor-pointer border border-slate-200 dark:border-slate-700 touch-manipulation select-none"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
-                    <span>{isCheckingUpdate ? t.checkingBtn : t.checkForUpdatesBtn}</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate || isUpdating ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+                    <span>{isUpdating ? 'Actualizando NITA...' : isCheckingUpdate ? t.checkingBtn : t.checkForUpdatesBtn}</span>
                   </button>
                   {lastUpdateMessage && (
-                    <div className="flex items-center justify-center gap-1.5 text-2xs text-emerald-700 dark:text-emerald-400 text-center pt-0.5">
-                      <CheckCircle2 className="w-3 h-3" />
+                    <div className="flex items-center justify-center gap-1.5 text-2xs text-emerald-700 dark:text-emerald-400 text-center pt-0.5 font-medium animate-in fade-in duration-200">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                       <span>{lastUpdateMessage}</span>
                     </div>
                   )}
                   <p className="text-2xs text-slate-400 text-center">
                     {t.autoUpdateNotice}
                   </p>
+                  {onForceCleanReload && (
+                    <button
+                      type="button"
+                      onClick={onForceCleanReload}
+                      disabled={isCheckingUpdate || isUpdating}
+                      className="w-full text-center text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline underline-offset-2 pt-1 transition-colors cursor-pointer touch-manipulation active:scale-[0.98]"
+                    >
+                      ¿Problemas al actualizar en móvil? Forzar recarga limpia
+                    </button>
+                  )}
                 </div>
               )}
             </div>

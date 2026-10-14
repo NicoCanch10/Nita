@@ -76,9 +76,11 @@ function MainApp() {
   const { 
     updateAvailable, 
     isChecking: isCheckingUpdate, 
+    isUpdating,
     lastCheckMessage, 
     checkForUpdate, 
-    applyUpdate 
+    applyUpdate,
+    forceCleanReload 
   } = usePWAUpdate();
 
   // Interactive Onboarding tutorial modal
@@ -808,7 +810,9 @@ function MainApp() {
           onApplyUpdate={applyUpdate}
           onCheckForUpdate={checkForUpdate}
           isCheckingUpdate={isCheckingUpdate}
+          isUpdating={isUpdating}
           lastUpdateMessage={lastCheckMessage}
+          onForceCleanReload={forceCleanReload}
           onMonthChange={setMonth}
           onYearChange={setYear}
           onCurrencyChange={handleCurrencyChange}
@@ -834,6 +838,8 @@ function MainApp() {
           onTogglePaid={handleToggleFixedExpensePaid}
           alertSettings={alertSettings}
           language={language}
+          year={year}
+          month={month}
         />
         
         {/* Navigation Tabs Bar: Completa todo el espacio disponible y con color dark:bg-slate-900 */}
