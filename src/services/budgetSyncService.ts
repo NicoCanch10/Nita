@@ -14,14 +14,21 @@ import {
   CategoryInfo, 
   CurrencyCode,
   FixedExpense,
-  VariableExpense 
+  VariableExpense,
+  getMonthKey
 } from '../types/budget';
 import { 
   loadBudgetState, 
   loadGlobalCategories, 
   saveBudgetState, 
-  saveGlobalCategories 
+  saveGlobalCategories,
+  createFreshMonthData,
+  getPendingSyncQueue,
+  removePendingSyncItem,
+  removePendingMonthFromQueue,
+  hasPendingSync
 } from '../utils/storage';
+import { DEFAULT_CATEGORIES } from '../utils/currency';
 
 export interface UserProfileDoc {
   uid: string;
@@ -201,11 +208,11 @@ export async function fetchAndSyncUserData(
   const monthsColRef = collection(db, 'users', userId, 'months');
   const catsDocRef = doc(db, 'users', userId, 'categories', 'global');
 
-  // Load existing local state
-  const localBudgetState = loadBudgetState();
-  const localCategories = loadGlobalCategories();
+  // Load strictly isolated local cache for this specific authenticated user
+  const localBudgetState = loadBudgetState(userId, false);
+  const localCategories = loadGlobalCategories(userId, false);
 
-  // If the device is currently offline, gracefully return the existing local budget state
+  // If the device is currently offline, return this user's isolated local budget state
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return {
       months: localBudgetState.monthsData || {},
@@ -265,57 +272,40 @@ export async function fetchAndSyncUserData(
 
   const hasRemoteMonths = Object.keys(remoteMonths).length > 0;
 
+  // Retrieve any pending offline changes that were added by THIS user while connection was interrupted
+  const pendingItems = getPendingSyncQueue(userId);
+  const pendingMonthKeys = new Set(
+    pendingItems
+      .filter(item => item.type === 'month' && item.monthKey)
+      .map(item => item.monthKey as string)
+  );
+  const hasPendingCategories = pendingItems.some(item => item.type === 'categories');
+
   // Case A: User ALREADY has existing cloud data in Google Firestore (e.g. from previous session or other device)
   if (hasRemoteMonths || remoteUserDoc) {
-    // Sincronización directa entre el Dispositivo y la nube de Google:
-    // Google Cloud es la única fuente oficial de la verdad.
-    // El dispositivo descarga y adopta directamente los datos almacenados en Google.
-    let finalMonths: Record<string, MonthData> = remoteMonths;
+    // Cloud is authoritative base, but preserve any pending offline edits specifically made by this user
+    let finalMonths: Record<string, MonthData> = { ...remoteMonths };
 
-    // Si la nube ya contiene meses guardados, la nube de Google manda de forma absoluta
-    if (hasRemoteMonths) {
-      finalMonths = { ...remoteMonths };
-    } else if (localBudgetState.monthsData && Object.keys(localBudgetState.monthsData).length > 0) {
-      // Si la cuenta existía pero aún no tenía meses y el dispositivo local tiene datos válidos, los migramos a Google
-      finalMonths = { ...localBudgetState.monthsData };
-      for (const [mKey, mData] of Object.entries(localBudgetState.monthsData)) {
-        if (!mData) continue;
-        const [yStr, mStr] = mKey.split('-');
-        const y = parseInt(yStr, 10) || new Date().getFullYear();
-        const m = (parseInt(mStr, 10) - 1) >= 0 ? parseInt(mStr, 10) - 1 : new Date().getMonth();
-        try {
-          const payload = cleanForFirestore({
-            userId,
-            monthKey: mKey,
-            year: y,
-            month: m,
-            income: Number(mData.income) || 0,
-            savingsRate: Number(mData.savingsRate) || 0,
-            extraDaysPosition: mData.extraDaysPosition || 'end',
-            categories: (mData.categories || []).map(cleanCategory),
-            fixedExpenses: (mData.fixedExpenses || []).map(cleanFixedExpense),
-            variableExpenses: (mData.variableExpenses || []).map(cleanVariableExpense),
-            jarAdjustments: mData.jarAdjustments || {},
-            lastJarAdjustmentLog: mData.lastJarAdjustmentLog ? cleanForFirestore(mData.lastJarAdjustmentLog) : null,
-            updatedAt: nowIso,
-          });
-          await setDoc(doc(db, 'users', userId, 'months', mKey), payload);
-        } catch (e) {
-          console.error('Error migrating initial local month to Google Firestore:', mKey, e);
+    if (localBudgetState.monthsData) {
+      for (const [mKey, localData] of Object.entries(localBudgetState.monthsData)) {
+        if (pendingMonthKeys.has(mKey) && localData) {
+          finalMonths[mKey] = localData;
         }
       }
     }
 
-    // Final categories directly from Google or fallback to local
-    const finalCategories = (remoteCategories && remoteCategories.length > 0) 
-      ? remoteCategories 
-      : (localCategories || []).map(cleanCategory);
+    // Final categories: prefer pending local categories if this user modified them offline, otherwise remote
+    const finalCategories = hasPendingCategories && localCategories && localCategories.length > 0
+      ? (localCategories || []).map(cleanCategory)
+      : (remoteCategories && remoteCategories.length > 0) 
+        ? remoteCategories 
+        : (localCategories && localCategories.length > 0 ? localCategories.map(cleanCategory) : DEFAULT_CATEGORIES.map(c => ({ ...c })));
 
-    if (!remoteCategories && localCategories.length > 0) {
+    if (!remoteCategories && finalCategories.length > 0) {
       try {
         await setDoc(catsDocRef, cleanForFirestore({
           userId,
-          categories: localCategories.map(cleanCategory),
+          categories: finalCategories.map(cleanCategory),
           updatedAt: nowIso,
         }));
       } catch (e) {
@@ -339,14 +329,23 @@ export async function fetchAndSyncUserData(
       }
     }
 
-    // Guardar copia local de respaldo sincronizada directamente con Google
+    // Save strictly to this user's isolated local cache
     saveBudgetState({
       month: localBudgetState.month,
       year: localBudgetState.year,
       currency: remoteUserDoc?.currency || localBudgetState.currency || 'ARS',
       monthsData: finalMonths,
-    });
-    saveGlobalCategories(finalCategories);
+    }, userId, false);
+    saveGlobalCategories(finalCategories, userId, false);
+
+    // If there were pending offline items for this user, flush queue in background
+    if (pendingItems.length > 0) {
+      setTimeout(() => {
+        processPendingSyncQueue(userId).catch(err => {
+          console.warn('Initial pending sync flush error:', err);
+        });
+      }, 500);
+    }
 
     return {
       months: finalMonths,
@@ -357,14 +356,25 @@ export async function fetchAndSyncUserData(
     };
   }
 
-  // Case B: Completely new user in Cloud -> Migrate all current local data to Firestore
+  // Case B: Completely new user in Cloud -> Must start completely FRESH and clean at 0.
+  // NEVER automatically import or migrate generic/foreign local data into a new account.
+  const finalCategories = DEFAULT_CATEGORIES.map(c => ({ ...c }));
+  const now = new Date();
+  const currentOngoingYear = now.getFullYear();
+  const currentOngoingMonth = now.getMonth();
+  const currentOngoingKey = getMonthKey(currentOngoingYear, currentOngoingMonth);
+  const cleanInitialMonth = createFreshMonthData(finalCategories);
+  const finalMonths: Record<string, MonthData> = {
+    [currentOngoingKey]: cleanInitialMonth,
+  };
+
   try {
     await setDoc(userDocRef, cleanForFirestore({
       uid: userId,
       email: userMeta?.email || null,
       displayName: userMeta?.displayName || null,
       photoURL: userMeta?.photoURL || null,
-      currency: localBudgetState.currency || 'ARS',
+      currency: 'ARS',
       updatedAt: nowIso,
     }));
   } catch (error) {
@@ -374,48 +384,48 @@ export async function fetchAndSyncUserData(
   try {
     await setDoc(catsDocRef, cleanForFirestore({
       userId,
-      categories: (localCategories || []).map(cleanCategory),
+      categories: finalCategories.map(cleanCategory),
       updatedAt: nowIso,
     }));
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `users/${userId}/categories/global`);
   }
 
-  if (localBudgetState.monthsData) {
-    for (const [mKey, mData] of Object.entries(localBudgetState.monthsData)) {
-      if (!mData) continue;
-      const [yStr, mStr] = mKey.split('-');
-      const y = parseInt(yStr, 10) || new Date().getFullYear();
-      const m = (parseInt(mStr, 10) - 1) >= 0 ? parseInt(mStr, 10) - 1 : new Date().getMonth();
-
-      try {
-        const payload = cleanForFirestore({
-          userId,
-          monthKey: mKey,
-          year: y,
-          month: m,
-          income: Number(mData.income) || 0,
-          savingsRate: Number(mData.savingsRate) || 0,
-          extraDaysPosition: mData.extraDaysPosition || 'end',
-          categories: (mData.categories || []).map(cleanCategory),
-          fixedExpenses: (mData.fixedExpenses || []).map(cleanFixedExpense),
-          variableExpenses: (mData.variableExpenses || []).map(cleanVariableExpense),
-          jarAdjustments: mData.jarAdjustments || {},
-          lastJarAdjustmentLog: mData.lastJarAdjustmentLog ? cleanForFirestore(mData.lastJarAdjustmentLog) : null,
-          updatedAt: nowIso,
-        });
-        await setDoc(doc(db, 'users', userId, 'months', mKey), payload);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, `users/${userId}/months/${mKey}`);
-      }
-    }
+  try {
+    const payload = cleanForFirestore({
+      userId,
+      monthKey: currentOngoingKey,
+      year: currentOngoingYear,
+      month: currentOngoingMonth,
+      income: 0,
+      savingsRate: 0,
+      extraDaysPosition: 'end',
+      categories: finalCategories.map(cleanCategory),
+      fixedExpenses: [],
+      variableExpenses: [],
+      jarAdjustments: {},
+      lastJarAdjustmentLog: null,
+      updatedAt: nowIso,
+    });
+    await setDoc(doc(db, 'users', userId, 'months', currentOngoingKey), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `users/${userId}/months/${currentOngoingKey}`);
   }
 
+  // Save isolated local cache for this new user starting at 0
+  saveBudgetState({
+    month: currentOngoingMonth,
+    year: currentOngoingYear,
+    currency: 'ARS',
+    monthsData: finalMonths,
+  }, userId, false);
+  saveGlobalCategories(finalCategories, userId, false);
+
   return {
-    months: localBudgetState.monthsData || {},
-    categories: (localCategories || []).map(cleanCategory),
-    currency: localBudgetState.currency,
-    source: 'local_migrated',
+    months: finalMonths,
+    categories: finalCategories,
+    currency: 'ARS',
+    source: 'cloud',
   };
 }
 
@@ -430,9 +440,31 @@ export async function migrateLocalDataToFirestoreIfEmpty(
 }
 
 /**
+ * Wraps an async Firestore promise with a network timeout (default 8s)
+ * to prevent hanging or blocking on intermittent 4G/5G mobile connections.
+ */
+export function withTimeout<T>(promise: Promise<T>, timeoutMs = 8000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout de red (${timeoutMs}ms) al comunicarse con Google Firestore`));
+    }, timeoutMs);
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+/**
  * Saves a single month data record to Firestore.
  * Automatically sanitizes fixedExpenses and all fields so that omitted due dates
  * NEVER throw "Unsupported field value: undefined" errors to Google Cloud.
+ * Uses withTimeout to guard against silent cellular network drops.
  */
 export async function saveMonthToFirestore(
   userId: string,
@@ -459,14 +491,14 @@ export async function saveMonthToFirestore(
       lastJarAdjustmentLog: data.lastJarAdjustmentLog ? cleanForFirestore(data.lastJarAdjustmentLog) : null,
       updatedAt: new Date().toISOString(),
     });
-    await setDoc(monthDocRef, payload);
+    await withTimeout(setDoc(monthDocRef, payload), 8000);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 /**
- * Saves global categories to Firestore
+ * Saves global categories to Firestore with timeout guard
  */
 export async function saveGlobalCategoriesToFirestore(
   userId: string,
@@ -480,14 +512,14 @@ export async function saveGlobalCategoriesToFirestore(
       categories: (categories || []).map(cleanCategory),
       updatedAt: new Date().toISOString(),
     });
-    await setDoc(catsRef, payload);
+    await withTimeout(setDoc(catsRef, payload), 8000);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 /**
- * Saves user preferences (e.g. currency) to Firestore
+ * Saves user preferences (e.g. currency) to Firestore with timeout guard
  */
 export async function saveUserPreferencesToFirestore(
   userId: string,
@@ -496,14 +528,62 @@ export async function saveUserPreferencesToFirestore(
   const path = `users/${userId}`;
   try {
     const userDocRef = doc(db, 'users', userId);
-    await setDoc(userDocRef, cleanForFirestore({
-      uid: userId,
-      ...preferences,
-      updatedAt: new Date().toISOString(),
-    }), { merge: true });
+    await withTimeout(
+      setDoc(userDocRef, cleanForFirestore({
+        uid: userId,
+        ...preferences,
+        updatedAt: new Date().toISOString(),
+      }), { merge: true }),
+      8000
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
+}
+
+/**
+ * Processes and flushes all pending offline sync items to Google Firestore.
+ * Automatically runs when internet connectivity is re-established, on window focus,
+ * or upon app launch.
+ */
+export async function processPendingSyncQueue(
+  userId: string
+): Promise<{ syncedCount: number; remainingCount: number }> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const q = getPendingSyncQueue(userId);
+    return { syncedCount: 0, remainingCount: q.length };
+  }
+
+  const queue = getPendingSyncQueue(userId);
+  if (queue.length === 0) {
+    return { syncedCount: 0, remainingCount: 0 };
+  }
+
+  let synced = 0;
+  for (const item of queue) {
+    try {
+      if (item.type === 'month' && item.monthKey && item.data && typeof item.year === 'number' && typeof item.month === 'number') {
+        await saveMonthToFirestore(item.userId, item.monthKey, item.year, item.month, item.data);
+        removePendingSyncItem(item.id);
+        synced++;
+      } else if (item.type === 'categories' && item.categories) {
+        await saveGlobalCategoriesToFirestore(item.userId, item.categories);
+        removePendingSyncItem(item.id);
+        synced++;
+      } else if (item.type === 'preferences' && item.preferences) {
+        await saveUserPreferencesToFirestore(item.userId, item.preferences);
+        removePendingSyncItem(item.id);
+        synced++;
+      }
+    } catch (err) {
+      console.warn(`[SyncQueue] Interrupted while uploading pending item ${item.id}:`, err);
+      // Stop on network failure to avoid hammer; remaining items stay in queue
+      break;
+    }
+  }
+
+  const remaining = getPendingSyncQueue(userId).length;
+  return { syncedCount: synced, remainingCount: remaining };
 }
 
 /**

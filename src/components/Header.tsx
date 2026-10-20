@@ -173,7 +173,15 @@ export const Header: React.FC<HeaderProps> = ({
             {user && (
               <div 
                 className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100/90 dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/80 text-3xs font-extrabold transition-all shadow-2xs select-none"
-                title="Sincronización en tiempo real activa en todos tus dispositivos"
+                title={
+                  syncStatus === 'syncing'
+                    ? 'Sincronizando con Google en este momento...'
+                    : syncStatus === 'error'
+                    ? 'La sincronización con Google falló. Reintentando automáticamente cada 5 segundos...'
+                    : syncStatus === 'offline'
+                    ? 'Modo sin conexión. Los cambios están guardados en este dispositivo y se sincronizarán al reconectar.'
+                    : 'Sincronización en tiempo real activa en todos tus dispositivos'
+                }
               >
                 {syncStatus === 'syncing' ? (
                   <>
@@ -187,8 +195,8 @@ export const Header: React.FC<HeaderProps> = ({
                   </>
                 ) : syncStatus === 'error' ? (
                   <>
-                    <Cloud className="w-3 h-3 text-amber-500 shrink-0" />
-                    <span className="text-amber-700 dark:text-amber-300">Reintentando</span>
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-500 shrink-0" />
+                    <span className="text-amber-700 dark:text-amber-300">Reintentando (5s)...</span>
                   </>
                 ) : (
                   <>

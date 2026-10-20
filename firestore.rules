@@ -2,12 +2,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 1. Global Default Deny
+    // 1. Bloqueo global por defecto (Default Deny)
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // 2. Global Helper Functions
+    // 2. Funciones auxiliares de autenticación y validación
     function isSignedIn() {
       return request.auth != null;
     }
@@ -16,39 +16,156 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     function incoming() {
       return request.resource.data;
     }
 
-    function existing() {
-      return resource.data;
+    function isValidTimestamp(val) {
+      return val is string && val.size() >= 10 && val.size() <= 40;
     }
 
-    // 3. User root document
+    function isValidCurrency(curr) {
+      return curr in [
+        'ARS', 'BOB', 'BRL', 'BZD', 'CLP', 'COP', 'CRC', 'CUP', 'DOP', 'EUR',
+        'GTQ', 'GYD', 'HNL', 'HTG', 'MXN', 'NIO', 'PAB', 'PEN', 'PYG', 'SRD',
+        'USD', 'UYU', 'VES'
+      ];
+    }
+
+    function isValidCategoryItem(cat) {
+      return cat is map
+        && cat.keys().hasAll(['id', 'label', 'color'])
+        && cat.keys().hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
+        && cat.id is string && cat.id.size() > 0 && cat.id.size() <= 64
+        && cat.label is string && cat.label.size() <= 100
+        && cat.color is string && cat.color.size() <= 32
+        && (!('isCustom' in cat) || cat.isCustom is bool)
+        && (!('badgeBg' in cat) || (cat.badgeBg is string && cat.badgeBg.size() <= 64))
+        && (!('badgeText' in cat) || (cat.badgeText is string && cat.badgeText.size() <= 64));
+    }
+
+    function isValidFixedExpense(exp) {
+      return exp is map
+        && exp.keys().hasAll(['id', 'name', 'amount', 'category', 'isPaid'])
+        && exp.keys().hasOnly(['id', 'name', 'amount', 'category', 'isPaid', 'dueDate', 'notes'])
+        && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
+        && exp.name is string && exp.name.size() <= 150
+        && exp.amount is number && exp.amount >= 0
+        && exp.category is string && exp.category.size() <= 64
+        && exp.isPaid is bool
+        && (!('dueDate' in exp) || (exp.dueDate is int && exp.dueDate >= 1 && exp.dueDate <= 31))
+        && (!('notes' in exp) || (exp.notes is string && exp.notes.size() <= 500));
+    }
+
+    function isValidVariableExpense(exp) {
+      return exp is map
+        && exp.keys().hasAll(['id', 'date', 'description', 'amount', 'category'])
+        && exp.keys().hasOnly(['id', 'date', 'description', 'amount', 'category'])
+        && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
+        && exp.date is string && exp.date.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && exp.description is string && exp.description.size() <= 200
+        && exp.amount is number && exp.amount >= 0
+        && exp.category is string && exp.category.size() <= 64;
+    }
+
+    function areValidCategories(cats) {
+      return cats is list && cats.size() <= 100
+        && (cats.size() < 1 || isValidCategoryItem(cats[0]))
+        && (cats.size() < 2 || isValidCategoryItem(cats[1]))
+        && (cats.size() < 3 || isValidCategoryItem(cats[2]))
+        && (cats.size() < 4 || isValidCategoryItem(cats[3]))
+        && (cats.size() < 5 || isValidCategoryItem(cats[4]));
+    }
+
+    function areValidFixedExpenses(list) {
+      return list is list && list.size() <= 300
+        && (list.size() < 1 || isValidFixedExpense(list[0]))
+        && (list.size() < 2 || isValidFixedExpense(list[1]))
+        && (list.size() < 3 || isValidFixedExpense(list[2]))
+        && (list.size() < 4 || isValidFixedExpense(list[3]))
+        && (list.size() < 5 || isValidFixedExpense(list[4]));
+    }
+
+    function areValidVariableExpenses(list) {
+      return list is list && list.size() <= 1500
+        && (list.size() < 1 || isValidVariableExpense(list[0]))
+        && (list.size() < 2 || isValidVariableExpense(list[1]))
+        && (list.size() < 3 || isValidVariableExpense(list[2]))
+        && (list.size() < 4 || isValidVariableExpense(list[3]))
+        && (list.size() < 5 || isValidVariableExpense(list[4]));
+    }
+
+    function isValidJarLog(log) {
+      return log == null || (
+        log is map
+        && log.keys().hasOnly(['date', 'exceededJarTitle', 'diff', 'transferredToNextMonth', 'nextMonthKey'])
+        && (!('date' in log) || (log.date is string && log.date.size() <= 50))
+        && (!('exceededJarTitle' in log) || (log.exceededJarTitle is string && log.exceededJarTitle.size() <= 100))
+        && (!('diff' in log) || (log.diff is number && log.diff >= 0))
+        && (!('transferredToNextMonth' in log) || log.transferredToNextMonth is bool)
+        && (!('nextMonthKey' in log) || (log.nextMonthKey is string && log.nextMonthKey.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')))
+      );
+    }
+
+    // 3. Documento de perfil de usuario (/users/{userId})
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(userId) && incoming().uid == userId;
-      allow update: if isOwner(userId) && isValidId(userId) && incoming().uid == userId;
-      allow delete: if isOwner(userId);
+      allow delete: if false; // Previene borrado accidental o malicioso
 
-      // Global Categories subcollection
+      allow create, update: if isOwner(userId)
+        && incoming().uid == userId
+        && incoming().keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'currency', 'language', 'onboardingSeen', 'updatedAt'])
+        && (!('currency' in incoming()) || isValidCurrency(incoming().currency))
+        && (!('language' in incoming()) || (incoming().language is string && incoming().language.size() <= 10))
+        && (!('onboardingSeen' in incoming()) || incoming().onboardingSeen is bool)
+        && (!('email' in incoming()) || incoming().email == null || (incoming().email is string && incoming().email.size() <= 200))
+        && (!('displayName' in incoming()) || incoming().displayName == null || (incoming().displayName is string && incoming().displayName.size() <= 150))
+        && (!('photoURL' in incoming()) || incoming().photoURL == null || (incoming().photoURL is string && incoming().photoURL.size() <= 500))
+        && (!('updatedAt' in incoming()) || isValidTimestamp(incoming().updatedAt));
+
+      // 4. Categorías globales (/users/{userId}/categories/global)
       match /categories/{docId} {
         allow read: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(docId) && incoming().userId == userId;
-        allow update: if isOwner(userId) && isValidId(docId) && incoming().userId == userId;
-        allow delete: if isOwner(userId);
+        allow delete: if false;
+
+        allow create, update: if isOwner(userId)
+          && docId == 'global'
+          && incoming().userId == userId
+          && incoming().keys().hasOnly(['userId', 'categories', 'updatedAt'])
+          && areValidCategories(incoming().categories)
+          && (!('updatedAt' in incoming()) || isValidTimestamp(incoming().updatedAt));
       }
 
-      // Monthly budget data subcollection
+      // 5. Presupuestos mensuales (/users/{userId}/months/{monthKey})
       match /months/{monthKey} {
         allow read: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidId(monthKey) && incoming().userId == userId;
-        allow update: if isOwner(userId) && isValidId(monthKey) && incoming().userId == userId;
-        allow delete: if isOwner(userId);
+        allow delete: if false;
+
+        allow create, update: if isOwner(userId)
+          && monthKey.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && incoming().userId == userId
+          && incoming().monthKey == monthKey
+          && incoming().keys().hasOnly([
+            'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
+            'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses',
+            'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt'
+          ])
+          // Validar coherencia temporal estricta entre monthKey, year y month
+          && incoming().year is int && incoming().year >= 2000 && incoming().year <= 2100
+          && incoming().month is int && incoming().month >= 0 && incoming().month <= 11
+          && (
+            (incoming().month < 9 && monthKey == string(incoming().year) + '-0' + string(incoming().month + 1))
+            || (incoming().month >= 9 && monthKey == string(incoming().year) + '-' + string(incoming().month + 1))
+          )
+          && incoming().income is number && incoming().income >= 0
+          && incoming().savingsRate is number && incoming().savingsRate >= 0 && incoming().savingsRate <= 100
+          && incoming().extraDaysPosition in ['start', 'end']
+          && areValidCategories(incoming().categories)
+          && areValidFixedExpenses(incoming().fixedExpenses)
+          && areValidVariableExpenses(incoming().variableExpenses)
+          && incoming().jarAdjustments is map
+          && isValidJarLog(incoming().lastJarAdjustmentLog)
+          && (!('updatedAt' in incoming()) || isValidTimestamp(incoming().updatedAt));
       }
     }
   }

@@ -1,0 +1,55 @@
+name: NITA Firestore Security & Rules CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-suite:
+    name: Security Isolation & Firestore Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Setup Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: Install Firebase CLI Tools
+        run: npm install -g firebase-tools@latest
+
+      - name: Run Security Isolation Tests (Local Storage Protection)
+        run: npx tsx --test tests/security_isolation.test.ts
+
+      - name: Run Firestore Security Rules Tests (Emulator Suite - Strict Mode)
+        env:
+          FIREBASE_PROJECT_ID: "demo-nita-ci-test"
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+          STRICT_RULES_EMULATOR: "true"
+        run: |
+          firebase emulators:exec --only firestore --project demo-nita-ci-test "npx tsx --test tests/firestore_rules_emulator.test.ts"

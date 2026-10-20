@@ -106,24 +106,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return initialChoice === 'offline';
   });
 
-  // Initialize user from cached profile if user chose Google or Apple previously
-  const [user, setUser] = useState<NitaUser | null>(() => {
-    const initialChoice = getInitialAuthChoice();
-    const initialCached = getInitialCachedUser();
-    if ((initialChoice === 'google' || initialChoice === 'apple') && initialCached) {
-      const offline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
-      return synthesizeUser(initialCached, offline);
-    }
-    return null;
-  });
+  // Authenticated user state: starts null and strictly populated by Firebase Authentication
+  const [user, setUser] = useState<NitaUser | null>(null);
 
-  // If user already had a saved choice (offline or cached user), we don't need to block UI with a full-screen loading spinner
+  // Loading state remains true until Firebase onAuthStateChanged gives initial verdict
   const [loading, setLoading] = useState<boolean>(() => {
     const initialChoice = getInitialAuthChoice();
-    const initialCached = getInitialCachedUser();
     if (initialChoice === 'offline') return false;
-    if ((initialChoice === 'google' || initialChoice === 'apple') && initialCached) return false;
-    if (initialChoice === null) return false; // First visit, can show AuthScreen immediately
     return true;
   });
 
@@ -162,15 +151,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Firebase auth state listener
+  // Firebase auth state listener: authoritative source of truth for user authentication
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        // User successfully signed in
+        // Genuine Firebase authenticated user
         const providerId = currentUser.providerData?.[0]?.providerId || '';
         const choice: AuthChoice = providerId.includes('apple') ? 'apple' : 'google';
 
-        // Persist choice & user cache for both online and offline restarts
         const cached: CachedUserData = {
           uid: currentUser.uid,
           email: currentUser.email,
@@ -183,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             displayName: p.displayName,
             photoURL: p.photoURL,
           })) || [{ providerId: 'google.com' }],
-          isOfflineSession: false,
+          isOfflineSession: typeof navigator !== 'undefined' ? !navigator.onLine : false,
         };
 
         try {
@@ -200,42 +188,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsGuestMode(false);
         setLoading(false);
       } else {
-        // Firebase emitted null
+        // Firebase confirmed no active authenticated session
         const savedChoice = getInitialAuthChoice();
-        const savedCached = getInitialCachedUser();
-
-        // If the user previously chose Google/Apple AND we have a cached user:
-        // Do NOT kick the user out if they are offline or if token refresh is pending!
-        const currentlyOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
-
-        if ((savedChoice === 'google' || savedChoice === 'apple') && savedCached) {
-          if (currentlyOffline) {
-            // Keep the user in their remembered session in offline mode!
-            setUser(synthesizeUser(savedCached, true));
-            setAuthChoice(savedChoice);
-            setIsGuestMode(false);
-            setLoading(false);
-            return;
-          }
-          // If online, keep the cached user while Firebase re-authenticates or gracefully ready
-          setUser(synthesizeUser(savedCached, false));
-          setAuthChoice(savedChoice);
-          setIsGuestMode(false);
-          setLoading(false);
-          return;
-        }
 
         if (savedChoice === 'offline') {
           setUser(null);
+          setCachedUser(null);
           setIsGuestMode(true);
           setLoading(false);
-          return;
+        } else {
+          setUser(null);
+          setCachedUser(null);
+          setIsGuestMode(false);
+          setLoading(false);
         }
-
-        // No saved choice exists
-        setUser(null);
-        setIsGuestMode(false);
-        setLoading(false);
       }
     });
 

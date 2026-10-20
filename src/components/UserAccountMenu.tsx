@@ -14,6 +14,8 @@ import {
   X,
   ShieldAlert
 } from 'lucide-react';
+import { getPendingSyncQueue } from '../utils/storage';
+import { processPendingSyncQueue } from '../services/budgetSyncService';
 
 export const UserAccountMenu: React.FC = () => {
   const { 
@@ -35,7 +37,28 @@ export const UserAccountMenu: React.FC = () => {
   const [isLinkingApple, setIsLinkingApple] = useState(false);
   const [showAppleModal, setShowAppleModal] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isSyncingPending, setIsSyncingPending] = useState(false);
+  const [pendingCount, setPendingCount] = useState<number>(0);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isOpen && user) {
+      setPendingCount(getPendingSyncQueue(user.uid).length);
+    }
+  }, [isOpen, user]);
+
+  const handleManualSyncPending = async () => {
+    if (!user) return;
+    try {
+      setIsSyncingPending(true);
+      const res = await processPendingSyncQueue(user.uid);
+      setPendingCount(res.remainingCount);
+    } catch (e) {
+      console.warn('Manual sync error:', e);
+    } finally {
+      setIsSyncingPending(false);
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -168,7 +191,36 @@ export const UserAccountMenu: React.FC = () => {
           </div>
 
           {/* Sync Status Badge */}
-          {isOfflineSession || !isOnline ? (
+          {pendingCount > 0 ? (
+            <div className="my-3 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/80 flex items-center justify-between text-xs text-amber-800 dark:text-amber-300">
+              <div className="flex items-center gap-2">
+                <CloudOff className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <div className="leading-tight">
+                  <span className="font-bold text-2xs block">
+                    {pendingCount} cambio{pendingCount > 1 ? 's' : ''} guardado{pendingCount > 1 ? 's' : ''} local
+                  </span>
+                  <span className="text-[10px] text-amber-700/80 dark:text-amber-400/80">
+                    {isOnline && !isOfflineSession ? 'Reintentando cada 5s...' : `Pendiente${pendingCount > 1 ? 's' : ''} de sincronizar`}
+                  </span>
+                </div>
+              </div>
+              {isOnline && !isOfflineSession ? (
+                <button
+                  type="button"
+                  onClick={handleManualSyncPending}
+                  disabled={isSyncingPending}
+                  className="px-2 py-1 rounded-lg bg-amber-200 hover:bg-amber-300 dark:bg-amber-800 dark:hover:bg-amber-700 text-amber-900 dark:text-amber-100 text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1 shrink-0"
+                >
+                  {isSyncingPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Cloud className="w-3 h-3" />}
+                  Subir ahora
+                </button>
+              ) : (
+                <span className="text-[10px] font-bold uppercase bg-amber-200/70 dark:bg-amber-800/70 px-1.5 py-0.5 rounded-md text-amber-900 dark:text-amber-200 shrink-0">
+                  Guardado
+                </span>
+              )}
+            </div>
+          ) : isOfflineSession || !isOnline ? (
             <div className="my-3 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/80 flex items-center justify-between text-xs text-amber-800 dark:text-amber-300">
               <div className="flex items-center gap-2">
                 <CloudOff className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />

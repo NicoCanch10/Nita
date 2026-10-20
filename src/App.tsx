@@ -26,7 +26,12 @@ import {
   createFreshMonthData, 
   loadGlobalCategories,
   saveGlobalCategories,
-  exportToCSV 
+  exportToCSV,
+  enqueuePendingMonth,
+  enqueuePendingCategories,
+  enqueuePendingPreferences,
+  removePendingMonthFromQueue,
+  hasPendingSync
 } from './utils/storage';
 import { useTheme } from './hooks/useTheme';
 import { usePWAUpdate } from './hooks/usePWAUpdate';
@@ -50,7 +55,8 @@ import {
   saveUserPreferencesToFirestore,
   subscribeToUserMonths,
   subscribeToGlobalCategories,
-  subscribeToUserProfile
+  subscribeToUserProfile,
+  processPendingSyncQueue
 } from './services/budgetSyncService';
 import { 
   LayoutDashboard, 
@@ -68,6 +74,7 @@ function MainApp() {
   // Authentication & Multi-user state (supports logged in user & guest mode without account)
   const { user, loading: isAuthLoading, isGuestMode, isOnline, isOfflineSession } = useAuth();
   const isRemoteSyncRef = useRef(false);
+  const isFlushingRef = useRef(false);
 
   // Theme state: light or dark mode
   const { theme, toggleTheme } = useTheme();
@@ -110,11 +117,12 @@ function MainApp() {
     setIsOnboardingOpen(false);
   };
 
-  // Load state with isolated months
-  const [initialData] = useState(() => loadBudgetState());
+  // Load state strictly isolated for current identity (authenticated user or guest)
+  const [initialData] = useState(() => loadBudgetState(user?.uid, isGuestMode));
 
   const [month, setMonth] = useState<number>(initialData.month);
   const [year, setYear] = useState<number>(initialData.year);
+  const currentKey = useMemo(() => getMonthKey(year, month), [year, month]);
   const [currency, setCurrency] = useState<CurrencyCode>(initialData.currency);
   const [monthsData, setMonthsData] = useState<Record<string, MonthData>>(initialData.monthsData);
 
@@ -131,14 +139,28 @@ function MainApp() {
     setLanguage(code);
     saveSelectedLanguage(code);
     if (user) {
-      saveUserPreferencesToFirestore(user.uid, { language: code }).catch(() => {});
+      if (isOnline && !isOfflineSession) {
+        saveUserPreferencesToFirestore(user.uid, { language: code }).catch(() => {
+          enqueuePendingPreferences(user.uid, { language: code });
+          setSyncStatus('error');
+        });
+      } else {
+        enqueuePendingPreferences(user.uid, { language: code });
+      }
     }
   };
 
   const handleCurrencyChange = (newCurrency: CurrencyCode) => {
     setCurrency(newCurrency);
     if (user) {
-      saveUserPreferencesToFirestore(user.uid, { currency: newCurrency }).catch(() => {});
+      if (isOnline && !isOfflineSession) {
+        saveUserPreferencesToFirestore(user.uid, { currency: newCurrency }).catch(() => {
+          enqueuePendingPreferences(user.uid, { currency: newCurrency });
+          setSyncStatus('error');
+        });
+      } else {
+        enqueuePendingPreferences(user.uid, { currency: newCurrency });
+      }
     }
   };
 
@@ -199,15 +221,85 @@ function MainApp() {
     };
   }, [user?.uid, isOnline, isOfflineSession]);
 
-  // When device returns online, automatically push latest month data if user is logged in
+  const monthsDataRef = useRef(monthsData);
+  monthsDataRef.current = monthsData;
+  const currentKeyRef = useRef(currentKey);
+  currentKeyRef.current = currentKey;
+  const yearRef = useRef(year);
+  yearRef.current = year;
+  const monthRef = useRef(month);
+  monthRef.current = month;
+  const syncStatusRef = useRef(syncStatus);
+  syncStatusRef.current = syncStatus;
+
+  // Sincronización con Google Firestore y cola de reintento:
+  // Si la sincronización con Google falla o la conexión se interrumpe, se guarda
+  // inmediatamente en cola local y se reintenta sincronizar automáticamente cada 5 segundos.
   useEffect(() => {
-    if (isOnline && user && !isOfflineSession && isCloudSyncReady) {
-      const currentData = monthsData[currentKey];
-      if (currentData) {
-        saveMonthToFirestore(user.uid, currentKey, year, month, currentData).catch(() => {});
+    if (!user || isOfflineSession || !isCloudSyncReady) return;
+
+    const flushQueue = async () => {
+      // Evitar ejecuciones simultáneas
+      if (isFlushingRef.current) return;
+
+      const isNavOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+      if (isNavOffline) {
+        setSyncStatus('offline');
+        return;
       }
+
+      isFlushingRef.current = true;
+      try {
+        if (hasPendingSync(user.uid)) {
+          setSyncStatus('syncing');
+          const res = await processPendingSyncQueue(user.uid);
+          if (res.remainingCount === 0) {
+            setSyncStatus('synced');
+          } else {
+            // Aún quedan elementos sin subir porque Google falló -> estado de error para reintentar
+            setSyncStatus(navigator.onLine ? 'error' : 'offline');
+          }
+        } else if (syncStatusRef.current === 'error') {
+          // Si el estado previo fue error, aseguramos la persistencia del mes activo
+          const currentData = monthsDataRef.current[currentKeyRef.current];
+          if (currentData) {
+            setSyncStatus('syncing');
+            await saveMonthToFirestore(user.uid, currentKeyRef.current, yearRef.current, monthRef.current, currentData);
+            setSyncStatus('synced');
+          }
+        }
+      } catch (err) {
+        console.warn('Reintento de sincronización con Google falló, se reintentará en 5 segundos:', err);
+        setSyncStatus(typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+      } finally {
+        isFlushingRef.current = false;
+      }
+    };
+
+    if (isOnline) {
+      flushQueue();
     }
-  }, [isOnline]);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && (typeof navigator === 'undefined' || navigator.onLine)) {
+        flushQueue();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Reintento periódico: si la sincronización con Google falló o hay cambios pendientes, vuelve a intentar cada 5 segundos
+    const interval = setInterval(() => {
+      const isFailedOrPending = hasPendingSync(user.uid) || syncStatusRef.current === 'error' || syncStatusRef.current === 'offline';
+      if (isFailedOrPending) {
+        flushQueue();
+      }
+    }, 5000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
+    };
+  }, [isOnline, user?.uid, isOfflineSession, isCloudSyncReady]);
 
   // Real-time Firestore subscriptions across devices (Simultaneous viewing and instant live reflection)
   useEffect(() => {
@@ -224,13 +316,13 @@ function MainApp() {
         isRemoteSyncRef.current = true;
         setMonthsData(prev => {
           const updated = { ...prev, ...remoteMonths };
-          // Save backup locally
+          // Save backup locally isolated to this user
           saveBudgetState({
             month,
             year,
             currency,
             monthsData: updated,
-          });
+          }, user.uid, false);
           return updated;
         });
         setSyncStatus('synced');
@@ -240,7 +332,7 @@ function MainApp() {
     // 2. Global categories real-time subscription
     const unsubCategories = subscribeToGlobalCategories(user.uid, (remoteCats) => {
       if (remoteCats && remoteCats.length > 0) {
-        saveGlobalCategories(remoteCats);
+        saveGlobalCategories(remoteCats, user.uid, false);
         setMonthsData(prev => {
           const updatedMap = { ...prev };
           Object.keys(updatedMap).forEach(key => {
@@ -284,9 +376,6 @@ function MainApp() {
   const t = useMemo(() => getTranslations(language), [language]);
   const monthNames = useMemo(() => t.months || MONTH_NAMES_ES, [t]);
 
-  // Active month key (e.g. "2026-10")
-  const currentKey = useMemo(() => getMonthKey(year, month), [year, month]);
-
   // Retrieve isolated data for the active month
   const activeMonthData = useMemo(() => {
     return monthsData[currentKey] || createFreshMonthData();
@@ -297,13 +386,13 @@ function MainApp() {
     if (user && !isCloudSyncReady) return;
 
     if (!monthsData[currentKey]) {
-      const cats = loadGlobalCategories();
+      const cats = loadGlobalCategories(user?.uid, isGuestMode);
       setMonthsData(prev => ({
         ...prev,
         [currentKey]: createFreshMonthData(cats),
       }));
     }
-  }, [currentKey, monthsData, user, isCloudSyncReady]);
+  }, [currentKey, monthsData, user, isGuestMode, isCloudSyncReady]);
 
   // Synchronize state changes to localStorage and Firestore with debouncing to prevent UI freezing on tablets/mobile
   useEffect(() => {
@@ -318,36 +407,60 @@ function MainApp() {
       return;
     }
 
-    const timer = setTimeout(() => {
-      // 1. Save local backup
-      saveBudgetState({
-        month,
-        year,
-        currency,
-        monthsData,
-      });
+    // 1. Immediately back up to localStorage without waiting for the network debounce timer.
+    // Guarantees that local information is 100% saved even if the phone screen locks or tab unloads immediately.
+    saveBudgetState({
+      month,
+      year,
+      currency,
+      monthsData,
+    }, user?.uid, isGuestMode);
 
-      // 2. Persist to Firestore if user is logged in and online
-      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+    const timer = setTimeout(() => {
+      // 2. Persist to Firestore if user has active session
+      if (user && isCloudSyncReady) {
         const currentData = monthsData[currentKey];
         if (currentData) {
-          setSyncStatus('syncing');
-          saveMonthToFirestore(user.uid, currentKey, year, month, currentData)
-            .then(() => setSyncStatus('synced'))
-            .catch(err => {
-              console.error('Error syncing month to Firestore:', err);
-              setSyncStatus(isOnline ? 'error' : 'offline');
-            });
+          if (!isOnline || isOfflineSession) {
+            // Disconnected or offline session: enqueue immediately into persistent pending queue
+            enqueuePendingMonth(user.uid, currentKey, year, month, currentData);
+            setSyncStatus('offline');
+          } else {
+            setSyncStatus('syncing');
+            saveMonthToFirestore(user.uid, currentKey, year, month, currentData)
+              .then(() => {
+                removePendingMonthFromQueue(user.uid, currentKey);
+                // Flush other pending items if any remain
+                processPendingSyncQueue(user.uid)
+                  .then(res => {
+                    if (res.remainingCount === 0) setSyncStatus('synced');
+                    else setSyncStatus('error');
+                  })
+                  .catch(() => setSyncStatus('error'));
+              })
+              .catch(err => {
+                console.warn('Sync to Google interrupted/failed, saving to pending queue (reintentando cada 5s):', err);
+                enqueuePendingMonth(user.uid, currentKey, year, month, currentData);
+                setSyncStatus(isOnline ? 'error' : 'offline');
+              });
+          }
         }
 
-        // If active month transferred diff to next month, also save nextKey
+        // If active month transferred diff to next month, also save or enqueue nextKey
         const log = currentData?.lastJarAdjustmentLog;
-        if (log?.transferredToNextMonth && log.nextMonthKey && monthsData[log.nextMonthKey]) {
-          const [nYStr, nMStr] = log.nextMonthKey.split('-');
+        const targetNextKey = log?.nextMonthKey;
+        if (log?.transferredToNextMonth && targetNextKey && monthsData[targetNextKey]) {
+          const [nYStr, nMStr] = targetNextKey.split('-');
           const nY = parseInt(nYStr, 10);
           const nM = parseInt(nMStr, 10) - 1;
-          saveMonthToFirestore(user.uid, log.nextMonthKey, nY, nM, monthsData[log.nextMonthKey])
-            .catch(() => {});
+          const nextData = monthsData[targetNextKey];
+          if (!isOnline || isOfflineSession) {
+            enqueuePendingMonth(user.uid, targetNextKey, nY, nM, nextData);
+          } else {
+            saveMonthToFirestore(user.uid, targetNextKey, nY, nM, nextData)
+              .then(() => removePendingMonthFromQueue(user.uid, targetNextKey))
+              .catch(() => enqueuePendingMonth(user.uid, targetNextKey, nY, nM, nextData));
+          }
         }
       }
     }, 250);
@@ -577,12 +690,19 @@ function MainApp() {
       return nextMap;
     });
 
-    const currentGlobal = loadGlobalCategories();
+    const currentGlobal = loadGlobalCategories(user?.uid, isGuestMode);
     if (!currentGlobal.some(c => c.id === category.id)) {
       const updatedList = [...currentGlobal, { ...category }];
-      saveGlobalCategories(updatedList);
-      if (user && isOnline && !isOfflineSession) {
-        saveGlobalCategoriesToFirestore(user.uid, updatedList).catch(() => {});
+      saveGlobalCategories(updatedList, user?.uid, isGuestMode);
+      if (user) {
+        if (isOnline && !isOfflineSession) {
+          saveGlobalCategoriesToFirestore(user.uid, updatedList).catch(() => {
+            enqueuePendingCategories(user.uid, updatedList);
+            setSyncStatus(isOnline ? 'error' : 'offline');
+          });
+        } else {
+          enqueuePendingCategories(user.uid, updatedList);
+        }
       }
     }
   };
@@ -613,13 +733,20 @@ function MainApp() {
     });
 
     // Save to persistent global categories
-    const currentGlobal = loadGlobalCategories();
+    const currentGlobal = loadGlobalCategories(user?.uid, isGuestMode);
     const updatedGlobal = currentGlobal.some(c => c.id === id)
       ? currentGlobal.map(c => c.id === id ? { ...c, color } : c)
       : [...currentGlobal, { ...(activeMonthData.categories.find(c => c.id === id) || { id, label: id, color, isCustom: true }), color }];
-    saveGlobalCategories(updatedGlobal);
-    if (user && isOnline && !isOfflineSession) {
-      saveGlobalCategoriesToFirestore(user.uid, updatedGlobal).catch(() => {});
+    saveGlobalCategories(updatedGlobal, user?.uid, isGuestMode);
+    if (user) {
+      if (isOnline && !isOfflineSession) {
+        saveGlobalCategoriesToFirestore(user.uid, updatedGlobal).catch(() => {
+          enqueuePendingCategories(user.uid, updatedGlobal);
+          setSyncStatus(isOnline ? 'error' : 'offline');
+        });
+      } else {
+        enqueuePendingCategories(user.uid, updatedGlobal);
+      }
     }
   };
 
@@ -649,13 +776,20 @@ function MainApp() {
     });
 
     // Save to persistent global categories
-    const currentGlobal = loadGlobalCategories();
+    const currentGlobal = loadGlobalCategories(user?.uid, isGuestMode);
     const updatedGlobal = currentGlobal.some(c => c.id === id)
       ? currentGlobal.map(c => c.id === id ? { ...c, label } : c)
       : [...currentGlobal, { ...(activeMonthData.categories.find(c => c.id === id) || { id, label, color: '#6366f1', isCustom: true }), label }];
-    saveGlobalCategories(updatedGlobal);
-    if (user && isOnline && !isOfflineSession) {
-      saveGlobalCategoriesToFirestore(user.uid, updatedGlobal).catch(() => {});
+    saveGlobalCategories(updatedGlobal, user?.uid, isGuestMode);
+    if (user) {
+      if (isOnline && !isOfflineSession) {
+        saveGlobalCategoriesToFirestore(user.uid, updatedGlobal).catch(() => {
+          enqueuePendingCategories(user.uid, updatedGlobal);
+          setSyncStatus(isOnline ? 'error' : 'offline');
+        });
+      } else {
+        enqueuePendingCategories(user.uid, updatedGlobal);
+      }
     }
   };
 
@@ -672,11 +806,18 @@ function MainApp() {
       return nextMap;
     });
 
-    const currentGlobal = loadGlobalCategories();
+    const currentGlobal = loadGlobalCategories(user?.uid, isGuestMode);
     const remaining = currentGlobal.filter(c => c.id !== id);
-    saveGlobalCategories(remaining);
-    if (user && isOnline && !isOfflineSession) {
-      saveGlobalCategoriesToFirestore(user.uid, remaining).catch(() => {});
+    saveGlobalCategories(remaining, user?.uid, isGuestMode);
+    if (user) {
+      if (isOnline && !isOfflineSession) {
+        saveGlobalCategoriesToFirestore(user.uid, remaining).catch(() => {
+          enqueuePendingCategories(user.uid, remaining);
+          setSyncStatus(isOnline ? 'error' : 'offline');
+        });
+      } else {
+        enqueuePendingCategories(user.uid, remaining);
+      }
     }
   };
 
@@ -767,7 +908,7 @@ function MainApp() {
     exportToCSV(year, month, currency, activeMonthData);
   };
 
-  if (isAuthLoading) {
+  if (user && !isCloudSyncReady) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4">
         <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-blue-500/20 mb-4 animate-pulse">
@@ -783,10 +924,6 @@ function MainApp() {
         </div>
       </div>
     );
-  }
-
-  if (!user && !isGuestMode) {
-    return <AuthScreen />;
   }
 
   return (
@@ -1138,10 +1275,44 @@ function MainApp() {
   );
 }
 
+function AppShell() {
+  const { user, isGuestMode, loading: isAuthLoading } = useAuth();
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-blue-500/20 mb-4 animate-pulse">
+          <img src="/nita-logo.jpg" alt="NITA" className="w-full h-full object-cover" />
+        </div>
+        <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-wider font-serif">NITA</h2>
+        <p className="text-xs text-blue-600 dark:text-blue-400 font-bold mt-1 tracking-widest uppercase">
+          Tus Finanzas, Más Simples
+        </p>
+        <div className="mt-6 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+          <span>Iniciando sesión segura...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user && !isGuestMode) {
+    return <AuthScreen />;
+  }
+
+  // Key the MainApp by active identity:
+  // - User A: key="user_A"
+  // - User B: key="user_B"
+  // - Guest mode: key="guest"
+  // When logging out, user becomes null and MainApp is completely unmounted, clearing all memory state.
+  const identityKey = user ? `user_${user.uid}` : 'guest';
+  return <MainApp key={identityKey} />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
-      <MainApp />
+      <AppShell />
     </AuthProvider>
   );
 }
