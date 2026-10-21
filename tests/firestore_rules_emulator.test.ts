@@ -10,7 +10,12 @@ import {
 } from '@firebase/rules-unit-testing';
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 
-const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-nita-rules-test';
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-nita-ci-test';
+if (!PROJECT_ID.startsWith('demo-')) {
+  throw new Error(
+    `[Security Guard Error] El PROJECT_ID de pruebas ('${PROJECT_ID}') debe comenzar con 'demo-' para garantizar el aislamiento absoluto del emulador y bloquear cualquier tráfico hacia Google Cloud.`
+  );
+}
 const RULES_PATH = path.resolve(process.cwd(), 'firestore.rules');
 
 describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-testing', () => {
@@ -19,13 +24,28 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   before(async () => {
     try {
+      const rawHost = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+      const parts = rawHost.split(':');
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        throw new Error(
+          `[Firestore Config Error] FIRESTORE_EMULATOR_HOST tiene formato inválido: '${rawHost}'. Se requiere formato 'host:port' (ej: '127.0.0.1:8080').`
+        );
+      }
+      const host = parts[0].trim();
+      const port = Number(parts[1].trim());
+      if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+        throw new Error(
+          `[Firestore Config Error] Puerto de emulador inválido: '${parts[1]}'. Debe ser un entero entre 1 y 65535.`
+        );
+      }
+
       const rules = fs.readFileSync(RULES_PATH, 'utf8');
       testEnv = await initializeTestEnvironment({
         projectId: PROJECT_ID,
         firestore: {
           rules,
-          host: '127.0.0.1',
-          port: 8080,
+          host,
+          port,
         },
       });
       // Ping check if emulator is responsive
@@ -394,7 +414,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     );
   });
 
-  test('18. Verificación estática del catálogo de 23 monedas en firestore.rules', () => {
+  test('18. Verificación estática del catálogo de 23 monedas en firestore.rules', async (t) => {
     const rules = fs.readFileSync(RULES_PATH, 'utf8');
     const expectedCurrencies = [
       'ARS', 'BOB', 'BRL', 'BZD', 'CLP', 'COP', 'CRC', 'CUP', 'DOP', 'EUR',
@@ -402,9 +422,13 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
       'USD', 'UYU', 'VES'
     ];
     for (const curr of expectedCurrencies) {
-      assert.ok(rules.includes(`'${curr}'`), `firestore.rules debe incluir la moneda ${curr}`);
+      await t.test(`Presencia estática de '${curr}'`, () => {
+        assert.ok(rules.includes(`'${curr}'`), `firestore.rules debe incluir la moneda '${curr}'`);
+      });
     }
-    assert.strictEqual(rules.includes("'GBP'"), false, 'firestore.rules NO debe incluir GBP');
+    await t.test("Ausencia estática de 'GBP'", () => {
+      assert.strictEqual(rules.includes("'GBP'"), false, "firestore.rules NO debe incluir 'GBP'");
+    });
   });
 
   test('19. Admisión de cada una de las 23 monedas válidas en perfil de usuario -> PERMITIDO', async (t) => {
@@ -420,13 +444,15 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
       'USD', 'UYU', 'VES'
     ];
     for (const curr of validCurrencies) {
-      await assertSucceeds(
-        setDoc(userRef, {
-          uid: 'user_123',
-          currency: curr,
-          updatedAt: new Date().toISOString(),
-        })
-      );
+      await t.test(`Moneda válida: ${curr}`, async () => {
+        await assertSucceeds(
+          setDoc(userRef, {
+            uid: 'user_123',
+            currency: curr,
+            updatedAt: new Date().toISOString(),
+          })
+        );
+      });
     }
   });
 
@@ -446,7 +472,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     );
   });
 
-  test('21. Rechazo de moneda inexistente/aleatoria en perfil de usuario -> DENEGADO', async (t) => {
+  test('21. Rechazo de moneda inexistente/aleatoria (XYZ) en perfil de usuario -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
       t.skip('Emulador de Firestore no disponible (requiere Java)');
       return;
@@ -457,6 +483,22 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
       setDoc(userRef, {
         uid: 'user_123',
         currency: 'XYZ',
+        updatedAt: new Date().toISOString(),
+      })
+    );
+  });
+
+  test('22. Rechazo de moneda en minúsculas (usd) en perfil de usuario -> DENEGADO', async (t) => {
+    if (!isEmulatorAvailable || !testEnv) {
+      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      return;
+    }
+    const db = testEnv.authenticatedContext('user_123').firestore();
+    const userRef = doc(db, 'users', 'user_123');
+    await assertFails(
+      setDoc(userRef, {
+        uid: 'user_123',
+        currency: 'usd',
         updatedAt: new Date().toISOString(),
       })
     );
