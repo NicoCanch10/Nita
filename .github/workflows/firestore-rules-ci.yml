@@ -25,10 +25,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      -      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -41,7 +46,7 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install Project Dependencies
+      -      - name: Install Project Dependencies
         run: bun install --frozen-lockfile
 
       - name: Install Firebase CLI Tools
