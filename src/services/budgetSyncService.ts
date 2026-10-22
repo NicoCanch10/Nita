@@ -127,12 +127,22 @@ export function cleanFixedExpense(expense: FixedExpense | Record<string, any>): 
 }
 
 export function cleanVariableExpense(expense: VariableExpense | Record<string, any>): Record<string, any> {
+  let cleanDate = String(expense.date || '').trim();
+  if (cleanDate.includes('T')) {
+    cleanDate = cleanDate.split('T')[0];
+  } else if (cleanDate.includes(' ')) {
+    cleanDate = cleanDate.split(' ')[0];
+  }
+  if (!/^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/.test(cleanDate)) {
+    cleanDate = new Date().toISOString().split('T')[0];
+  }
+
   return {
-    id: String(expense.id || `v_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`),
-    date: String(expense.date || new Date().toISOString().split('T')[0]),
-    description: String(expense.description || '').trim(),
-    amount: Number(expense.amount) || 0,
-    category: String(expense.category || 'other'),
+    id: String(expense.id || `v_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`).slice(0, 64),
+    date: cleanDate,
+    description: String(expense.description || '').trim().slice(0, 200),
+    amount: Math.max(0, Number(expense.amount) || 0),
+    category: String(expense.category || 'other').slice(0, 64),
   };
 }
 

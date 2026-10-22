@@ -52,14 +52,15 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   // Helper to get default date:
   // - If viewing the current real month: defaults to today's current date
   // - If viewing a different month (e.g. November when currently in October): defaults to the 1st of that month (01)
-  const getDefaultExpenseDate = (targetYear: number, targetMonth: number, _maxDays: number): string => {
+  const getDefaultExpenseDate = (targetYear: number, targetMonth: number, maxDays: number): string => {
     const now = new Date();
     const currentY = now.getFullYear();
     const currentM = now.getMonth();
     const currentD = now.getDate();
 
     if (currentY === targetYear && currentM === targetMonth) {
-      return `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(currentD).padStart(2, '0')}`;
+      const validDay = Math.min(maxDays || 31, Math.max(1, currentD));
+      return `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(validDay).padStart(2, '0')}`;
     }
 
     // Default to first day of the month for other months
@@ -87,11 +88,15 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
       return;
     }
 
+    const effectiveDate = date && /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/.test(date)
+      ? date
+      : getDefaultExpenseDate(year, month, daysInMonth);
+
     onAddExpense({
       description: description.trim(),
       amount: Number(amount),
       category,
-      date,
+      date: effectiveDate,
     });
 
     setDescription('');
@@ -173,6 +178,8 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
             <input
               type="date"
               value={date}
+              min={`${year}-${String(month + 1).padStart(2, '0')}-01`}
+              max={`${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`}
               onChange={(e) => setDate(e.target.value)}
               className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-3 sm:px-3.5 py-2.5 text-xs sm:text-sm focus:outline-hidden focus:border-emerald-500 cursor-pointer"
               required

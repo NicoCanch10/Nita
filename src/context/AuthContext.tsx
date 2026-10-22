@@ -106,13 +106,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return initialChoice === 'offline';
   });
 
-  // Authenticated user state: starts null and strictly populated by Firebase Authentication
-  const [user, setUser] = useState<NitaUser | null>(null);
+  // Authenticated user state: restored immediately from device persistence if user signed in previously
+  const [user, setUser] = useState<NitaUser | null>(() => {
+    const initialChoice = getInitialAuthChoice();
+    const initialCached = getInitialCachedUser();
+    if (initialCached && (initialChoice === 'google' || initialChoice === 'apple')) {
+      return synthesizeUser(initialCached, typeof navigator !== 'undefined' ? !navigator.onLine : false);
+    }
+    return null;
+  });
 
-  // Loading state remains true until Firebase onAuthStateChanged gives initial verdict
+  // Loading state: if we already have the remembered user in local device storage, don't block with loading screen
   const [loading, setLoading] = useState<boolean>(() => {
     const initialChoice = getInitialAuthChoice();
+    const initialCached = getInitialCachedUser();
     if (initialChoice === 'offline') return false;
+    if (initialCached && (initialChoice === 'google' || initialChoice === 'apple')) return false;
     return true;
   });
 
@@ -188,13 +197,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsGuestMode(false);
         setLoading(false);
       } else {
-        // Firebase confirmed no active authenticated session
+        // Firebase auth state callback with null (e.g. offline, startup recovery delay, or network drop)
         const savedChoice = getInitialAuthChoice();
+        const existingCached = getInitialCachedUser();
 
         if (savedChoice === 'offline') {
           setUser(null);
           setCachedUser(null);
           setIsGuestMode(true);
+          setLoading(false);
+        } else if (existingCached && (savedChoice === 'google' || savedChoice === 'apple')) {
+          // El usuario tiene su cuenta guardada y recordada en este dispositivo y NO solicitó cerrar sesión.
+          // Mantenemos la sesión activa de forma permanente en el dispositivo.
+          const rememberedUser = synthesizeUser(existingCached, typeof navigator !== 'undefined' ? !navigator.onLine : false);
+          setUser(rememberedUser);
+          setCachedUser(existingCached);
+          setIsGuestMode(false);
           setLoading(false);
         } else {
           setUser(null);

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { AlertCircle, Loader2, UserX, WifiOff, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, Loader2, UserX, WifiOff } from 'lucide-react';
 
 export const AuthScreen: React.FC = () => {
   const { 
@@ -129,19 +129,6 @@ export const AuthScreen: React.FC = () => {
             <UserX className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
             <span>Ingresar sin cuenta</span>
           </button>
-        </div>
-
-        {/* Banner de Recordar Elección: Online u Offline */}
-        <div className="w-full mt-4 p-3 rounded-2xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 flex items-start gap-2.5 text-2xs text-blue-900 dark:text-blue-200">
-          <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-          <div className="leading-tight">
-            <span className="font-bold block text-slate-800 dark:text-slate-100">
-              NITA recordará siempre tu elección
-            </span>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 block leading-relaxed">
-              Tu método de acceso queda guardado en este dispositivo para que entres directo a tus finanzas, tanto si estás Online como si estás Offline.
-            </span>
-          </div>
         </div>
 
         {/* Nota explicativa sobre el modo sin cuenta */}

@@ -31,7 +31,8 @@ import {
   enqueuePendingCategories,
   enqueuePendingPreferences,
   removePendingMonthFromQueue,
-  hasPendingSync
+  hasPendingSync,
+  getPendingSyncQueue
 } from './utils/storage';
 import { useTheme } from './hooks/useTheme';
 import { usePWAUpdate } from './hooks/usePWAUpdate';
@@ -75,6 +76,8 @@ function MainApp() {
   const { user, loading: isAuthLoading, isGuestMode, isOnline, isOfflineSession } = useAuth();
   const isRemoteSyncRef = useRef(false);
   const isFlushingRef = useRef(false);
+  const pendingExpenseIdsRef = useRef<Set<string>>(new Set());
+  const pendingFixedIdsRef = useRef<Set<string>>(new Set());
 
   // Theme state: light or dark mode
   const { theme, toggleTheme } = useTheme();
@@ -315,7 +318,45 @@ function MainApp() {
       if (remoteMonths && Object.keys(remoteMonths).length > 0) {
         isRemoteSyncRef.current = true;
         setMonthsData(prev => {
-          const updated = { ...prev, ...remoteMonths };
+          const updated: Record<string, MonthData> = { ...prev };
+          const pendingItems = getPendingSyncQueue(user.uid);
+          const pendingMonthKeys = new Set(
+            pendingItems
+              .filter(item => item.type === 'month' && item.monthKey)
+              .map(item => item.monthKey as string)
+          );
+
+          for (const [mKey, remoteData] of Object.entries(remoteMonths)) {
+            const localData = prev[mKey];
+            if (!localData) {
+              updated[mKey] = remoteData;
+              continue;
+            }
+
+            // If this month has pending offline sync edits, preserve local data
+            if (pendingMonthKeys.has(mKey)) {
+              continue;
+            }
+
+            // Preserve any variable expenses that were added locally and are still in pendingExpenseIdsRef
+            const remoteVarIds = new Set((remoteData.variableExpenses || []).map(e => e.id));
+            const pendingVarExpenses = (localData.variableExpenses || []).filter(
+              e => pendingExpenseIdsRef.current.has(e.id) && !remoteVarIds.has(e.id)
+            );
+
+            // Preserve any fixed expenses that were added locally and are still in pendingFixedIdsRef
+            const remoteFixIds = new Set((remoteData.fixedExpenses || []).map(e => e.id));
+            const pendingFixExpenses = (localData.fixedExpenses || []).filter(
+              e => pendingFixedIdsRef.current.has(e.id) && !remoteFixIds.has(e.id)
+            );
+
+            updated[mKey] = {
+              ...remoteData,
+              variableExpenses: [...(remoteData.variableExpenses || []), ...pendingVarExpenses],
+              fixedExpenses: [...(remoteData.fixedExpenses || []), ...pendingFixExpenses],
+            };
+          }
+
           // Save backup locally isolated to this user
           saveBudgetState({
             month,
@@ -826,49 +867,186 @@ function MainApp() {
       ...expense,
       id: `f_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     };
-    updateActiveMonth(m => ({
-      ...m,
-      fixedExpenses: [...m.fixedExpenses, newExpense]
-    }));
+    pendingFixedIdsRef.current.add(newExpense.id);
+    updateActiveMonth(m => {
+      const updated: MonthData = {
+        ...m,
+        fixedExpenses: [...m.fixedExpenses, newExpense],
+      };
+      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+        setSyncStatus('syncing');
+        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+          .then(() => {
+            pendingFixedIdsRef.current.delete(newExpense.id);
+            removePendingMonthFromQueue(user.uid, currentKey);
+            setSyncStatus('synced');
+          })
+          .catch(err => {
+            console.warn('Sync to Google interrupted for fixed expense, queueing:', err);
+            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            setSyncStatus(isOnline ? 'error' : 'offline');
+          });
+      } else if (user) {
+        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      }
+      return updated;
+    });
   };
 
   const handleDeleteFixedExpense = (id: string) => {
-    updateActiveMonth(m => ({
-      ...m,
-      fixedExpenses: m.fixedExpenses.filter(e => e.id !== id)
-    }));
+    pendingFixedIdsRef.current.delete(id);
+    updateActiveMonth(m => {
+      const updated: MonthData = {
+        ...m,
+        fixedExpenses: m.fixedExpenses.filter(e => e.id !== id),
+      };
+      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+        setSyncStatus('syncing');
+        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+          .then(() => {
+            removePendingMonthFromQueue(user.uid, currentKey);
+            setSyncStatus('synced');
+          })
+          .catch(err => {
+            console.warn('Sync to Google interrupted for delete fixed expense, queueing:', err);
+            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            setSyncStatus(isOnline ? 'error' : 'offline');
+          });
+      } else if (user) {
+        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      }
+      return updated;
+    });
   };
 
   const handleToggleFixedExpensePaid = (id: string) => {
-    updateActiveMonth(m => ({
-      ...m,
-      fixedExpenses: m.fixedExpenses.map(e => e.id === id ? { ...e, isPaid: !e.isPaid } : e)
-    }));
+    updateActiveMonth(m => {
+      const updated: MonthData = {
+        ...m,
+        fixedExpenses: m.fixedExpenses.map(e => e.id === id ? { ...e, isPaid: !e.isPaid } : e),
+      };
+      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+        setSyncStatus('syncing');
+        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+          .then(() => {
+            removePendingMonthFromQueue(user.uid, currentKey);
+            setSyncStatus('synced');
+          })
+          .catch(err => {
+            console.warn('Sync to Google interrupted for toggle paid fixed expense, queueing:', err);
+            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            setSyncStatus(isOnline ? 'error' : 'offline');
+          });
+      } else if (user) {
+        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      }
+      return updated;
+    });
   };
 
-  const handleUpdateFixedExpense = (id: string, updated: Partial<FixedExpense>) => {
-    updateActiveMonth(m => ({
-      ...m,
-      fixedExpenses: m.fixedExpenses.map(e => e.id === id ? { ...e, ...updated } : e)
-    }));
+  const handleUpdateFixedExpense = (id: string, updatedFields: Partial<FixedExpense>) => {
+    updateActiveMonth(m => {
+      const updated: MonthData = {
+        ...m,
+        fixedExpenses: m.fixedExpenses.map(e => e.id === id ? { ...e, ...updatedFields } : e),
+      };
+      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+        setSyncStatus('syncing');
+        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+          .then(() => {
+            removePendingMonthFromQueue(user.uid, currentKey);
+            setSyncStatus('synced');
+          })
+          .catch(err => {
+            console.warn('Sync to Google interrupted for update fixed expense, queueing:', err);
+            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            setSyncStatus(isOnline ? 'error' : 'offline');
+          });
+      } else if (user) {
+        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      }
+      return updated;
+    });
   };
 
   const handleAddVariableExpense = (expense: Omit<VariableExpense, 'id'>) => {
+    const cleanDate = expense.date && /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/.test(expense.date)
+      ? expense.date
+      : `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const [expYear, expMonth] = cleanDate.split('-').map(Number);
+    const targetKey = getMonthKey(expYear, expMonth - 1);
+
     const newExpense: VariableExpense = {
       ...expense,
+      date: cleanDate,
       id: `v_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     };
-    updateActiveMonth(m => ({
-      ...m,
-      variableExpenses: [...m.variableExpenses, newExpense]
-    }));
+
+    pendingExpenseIdsRef.current.add(newExpense.id);
+
+    setMonthsData(prevMap => {
+      const current = prevMap[targetKey] || createFreshMonthData(categories);
+      const updated: MonthData = {
+        ...current,
+        variableExpenses: [...current.variableExpenses, newExpense],
+      };
+      const nextMap = {
+        ...prevMap,
+        [targetKey]: updated,
+      };
+
+      saveBudgetState({
+        month,
+        year,
+        currency,
+        monthsData: nextMap,
+      }, user?.uid, isGuestMode);
+
+      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+        setSyncStatus('syncing');
+        saveMonthToFirestore(user.uid, targetKey, expYear, expMonth - 1, updated)
+          .then(() => {
+            pendingExpenseIdsRef.current.delete(newExpense.id);
+            removePendingMonthFromQueue(user.uid, targetKey);
+            setSyncStatus('synced');
+          })
+          .catch(err => {
+            console.warn('Sync to Google interrupted for variable expense, queueing:', err);
+            enqueuePendingMonth(user.uid, targetKey, expYear, expMonth - 1, updated);
+            setSyncStatus(isOnline ? 'error' : 'offline');
+          });
+      } else if (user) {
+        enqueuePendingMonth(user.uid, targetKey, expYear, expMonth - 1, updated);
+      }
+
+      return nextMap;
+    });
   };
 
   const handleDeleteVariableExpense = (id: string) => {
-    updateActiveMonth(m => ({
-      ...m,
-      variableExpenses: m.variableExpenses.filter(e => e.id !== id)
-    }));
+    pendingExpenseIdsRef.current.delete(id);
+    updateActiveMonth(m => {
+      const updated: MonthData = {
+        ...m,
+        variableExpenses: m.variableExpenses.filter(e => e.id !== id),
+      };
+      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+        setSyncStatus('syncing');
+        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+          .then(() => {
+            removePendingMonthFromQueue(user.uid, currentKey);
+            setSyncStatus('synced');
+          })
+          .catch(err => {
+            console.warn('Sync to Google interrupted for delete variable expense, queueing:', err);
+            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            setSyncStatus(isOnline ? 'error' : 'offline');
+          });
+      } else if (user) {
+        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      }
+      return updated;
+    });
   };
 
   // Optional manual helper: copy fixed expenses and categories from previous month
@@ -965,7 +1143,7 @@ function MainApp() {
       </div>
 
       {/* Main Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-28 sm:pb-6 space-y-6">
         
         {/* Urgent Due Dates Alert Banner (Centered on mobile, respects alert preferences) */}
         <DueAlertBanner
@@ -979,8 +1157,8 @@ function MainApp() {
           month={month}
         />
         
-        {/* Navigation Tabs Bar: Completa todo el espacio disponible y con color dark:bg-slate-900 */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1 sm:gap-1.5 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-2xs sm:text-xs font-bold text-slate-600 dark:text-slate-300 shadow-xs transition-colors">
+        {/* Desktop Navigation Tabs Bar (Visible únicamente en pantallas medianas y de escritorio: sm en adelante) */}
+        <div className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-1.5 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-xs transition-colors">
           <button
             type="button"
             onClick={() => setActiveTab('all')}
@@ -1017,7 +1195,7 @@ function MainApp() {
             }`}
           >
             <Receipt className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-            <span className="truncate">{t.tabFixed} ({fixedExpenses.length})</span>
+            <span className="truncate">{t.tabFixed}</span>
           </button>
 
           <button
@@ -1030,7 +1208,7 @@ function MainApp() {
             }`}
           >
             <ShoppingBag className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span className="truncate">{t.tabDaily} ({variableExpenses.length})</span>
+            <span className="truncate">{t.tabDaily}</span>
           </button>
 
           <button
@@ -1047,48 +1225,48 @@ function MainApp() {
           </button>
         </div>
 
-        {/* Optional Manual Clone Banner if current month is empty and previous month has data */}
-        {fixedExpenses.length === 0 && previousMonthData && previousMonthData.fixedExpenses.length > 0 && (
-          <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2.5 text-indigo-900 dark:text-indigo-200">
-              <Info className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <span>
-                {monthNames[month]} {year} · {t.confirmCopy}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleCopyFromPreviousMonth}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors cursor-pointer shrink-0 self-start sm:self-auto shadow-2xs"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>{t.copyPreviousMonthBtn.replace('{month}', monthNames[previousMonthDate.getMonth()])}</span>
-            </button>
-          </div>
-        )}
-
-        {/* Primary KPI Summary: Ingreso Neto, Gastos Variables y Barra de Ahorro */}
-        <MetricCards
-          income={income}
-          savingsRate={savingsRate}
-          totalSavings={totalSavings}
-          onIncomeChange={handleIncomeChange}
-          onSavingsRateChange={handleSavingsRateChange}
-          totalFixedExpenses={totalFixedExpenses}
-          paidFixedExpenses={paidFixedExpenses}
-          pendingFixedExpenses={pendingFixedExpenses}
-          totalVariableSpent={totalVariableSpent}
-          monthlyRemaining={monthlyRemaining}
-          calcDetails={calcDetails}
-          remainingJars={remainingJars}
-          currency={currency}
-          currentDay={currentDay}
-          language={language}
-        />
-
         {/* View Layout Switcher */}
         {activeTab === 'all' && (
           <div className="space-y-6">
+            {/* Optional Manual Clone Banner if current month is empty and previous month has data */}
+            {fixedExpenses.length === 0 && previousMonthData && previousMonthData.fixedExpenses.length > 0 && (
+              <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5 text-indigo-900 dark:text-indigo-200">
+                  <Info className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>
+                    {monthNames[month]} {year} · {t.confirmCopy}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyFromPreviousMonth}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors cursor-pointer shrink-0 self-start sm:self-auto shadow-2xs"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{t.copyPreviousMonthBtn.replace('{month}', monthNames[previousMonthDate.getMonth()])}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Primary KPI Summary: Ingreso Neto, Gastos Variables y Barra de Ahorro (Sólo en Vista Completa) */}
+            <MetricCards
+              income={income}
+              savingsRate={savingsRate}
+              totalSavings={totalSavings}
+              onIncomeChange={handleIncomeChange}
+              onSavingsRateChange={handleSavingsRateChange}
+              totalFixedExpenses={totalFixedExpenses}
+              paidFixedExpenses={paidFixedExpenses}
+              pendingFixedExpenses={pendingFixedExpenses}
+              totalVariableSpent={totalVariableSpent}
+              monthlyRemaining={monthlyRemaining}
+              calcDetails={calcDetails}
+              remainingJars={remainingJars}
+              currency={currency}
+              currentDay={currentDay}
+              language={language}
+            />
+
             {/* The 5 Frascos Section */}
             <FiveJarsSection
               remainingJars={remainingJars}
@@ -1235,14 +1413,89 @@ function MainApp() {
 
       </main>
 
-      {/* Editorial Footer */}
-      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-5 mt-12 text-slate-500 dark:text-slate-400 text-xs transition-colors">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-center gap-2 text-center">
-          <span className="font-black text-slate-900 dark:text-white">{t.appTitle}</span>
-          <span>·</span>
-          <span>{t.monthLabel}: <strong className="text-slate-700 dark:text-slate-300">{monthNames[month]} {year}</strong></span>
+
+      {/* Mobile Bottom Fixed Navigation Bar (Visible únicamente en versión móvil, siempre fija en la parte inferior al desplazarse) */}
+      <nav 
+        aria-label="Navegación móvil"
+        className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/90 dark:border-slate-800 px-4 py-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.3)] transition-colors"
+      >
+        <div className="max-w-md mx-auto flex items-center justify-between gap-1">
+          {/* 1. A la izquierda: LOS 5 FRASCOS */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('jars')}
+            aria-label={t.tabJars}
+            title={t.tabJars}
+            className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${
+              activeTab === 'jars'
+                ? 'bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 shadow-xs scale-105'
+                : 'hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <JarIcon className="w-5 h-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          </button>
+
+          {/* 2. Seguido a eso: GASTOS FIJOS */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('fixed')}
+            aria-label={t.tabFixed}
+            title={t.tabFixed}
+            className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${
+              activeTab === 'fixed'
+                ? 'bg-blue-50 dark:bg-blue-950/70 border border-blue-200 dark:border-blue-800 shadow-xs scale-105'
+                : 'hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <Receipt className="w-5 h-5 shrink-0 text-blue-600 dark:text-blue-400" />
+          </button>
+
+          {/* 3. En el medio (y un poco más grande en tamaño): VISTA COMPLETA */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('all')}
+            aria-label={t.tabAll}
+            title={t.tabAll}
+            className={`flex items-center justify-center w-14 h-14 rounded-2xl transition-all cursor-pointer active:scale-95 shadow-md -my-1 ${
+              activeTab === 'all'
+                ? 'bg-blue-50 dark:bg-blue-950/80 border-2 border-blue-500 dark:border-blue-400 shadow-blue-500/25 scale-105'
+                : 'bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            <LayoutDashboard className="w-6 h-6 shrink-0 text-blue-600 dark:text-blue-400" />
+          </button>
+
+          {/* 4. Seguido a eso: CONSUMOS DIARIOS */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('daily')}
+            aria-label={t.tabDaily}
+            title={t.tabDaily}
+            className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${
+              activeTab === 'daily'
+                ? 'bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200 dark:border-emerald-800 shadow-xs scale-105'
+                : 'hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <ShoppingBag className="w-5 h-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          </button>
+
+          {/* 5. Por último: DIAGNOSTICO & SIMULADOR */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('health')}
+            aria-label={t.tabHealth}
+            title={t.tabHealth}
+            className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${
+              activeTab === 'health'
+                ? 'bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 shadow-xs scale-105'
+                : 'hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <PieChart className="w-5 h-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+          </button>
         </div>
-      </footer>
+      </nav>
 
       {/* Interactive Onboarding Tutorial Modal with Tabs */}
       <OnboardingModal
@@ -1253,7 +1506,7 @@ function MainApp() {
 
       {/* Auto-update toast notification */}
       {showUpdateNotice && (
-        <div className="fixed bottom-5 right-5 z-50 bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-300 max-w-sm">
+        <div className="fixed bottom-24 sm:bottom-5 right-5 z-50 bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-300 max-w-sm">
           <Sparkles className="w-5 h-5 text-emerald-200 shrink-0" />
           <div className="flex-1 text-xs sm:text-sm font-bold">
             {language === 'en' 

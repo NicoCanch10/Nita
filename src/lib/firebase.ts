@@ -1,6 +1,10 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
+  initializeAuth,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  setPersistence,
   GoogleAuthProvider, 
   OAuthProvider,
   signInWithPopup,
@@ -22,8 +26,21 @@ import firebaseConfig from '../../firebase-applet-config.json';
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firebase Auth
-export const auth = getAuth(app);
+// Initialize Firebase Auth with persistent local storage so login is remembered permanently on this device
+let firebaseAuth: ReturnType<typeof getAuth>;
+try {
+  firebaseAuth = initializeAuth(app, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+  });
+} catch {
+  firebaseAuth = getAuth(app);
+}
+
+export const auth = firebaseAuth;
+
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence).catch(() => {});
+}
 
 // Initialize Firestore with named database and offline persistence
 const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
@@ -110,10 +127,16 @@ appleProvider.addScope('name');
 
 // Auth actions
 export async function signInWithGoogle() {
+  if (typeof window !== 'undefined') {
+    await setPersistence(auth, browserLocalPersistence).catch(() => {});
+  }
   return await signInWithPopup(auth, googleProvider);
 }
 
 export async function signInWithApple() {
+  if (typeof window !== 'undefined') {
+    await setPersistence(auth, browserLocalPersistence).catch(() => {});
+  }
   return await signInWithPopup(auth, appleProvider);
 }
 
