@@ -1,16 +1,12 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
-  initializeAuth,
-  browserLocalPersistence,
-  indexedDBLocalPersistence,
-  setPersistence,
   GoogleAuthProvider, 
-  OAuthProvider,
-  signInWithPopup,
-  signOut,
-  linkWithPopup,
-  User
+  OAuthProvider, 
+  signInWithPopup, 
+  signOut, 
+  linkWithPopup, 
+  User 
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
@@ -26,21 +22,8 @@ import firebaseConfig from '../../firebase-applet-config.json';
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firebase Auth with persistent local storage so login is remembered permanently on this device
-let firebaseAuth: ReturnType<typeof getAuth>;
-try {
-  firebaseAuth = initializeAuth(app, {
-    persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-  });
-} catch {
-  firebaseAuth = getAuth(app);
-}
-
-export const auth = firebaseAuth;
-
-if (typeof window !== 'undefined') {
-  setPersistence(auth, browserLocalPersistence).catch(() => {});
-}
+// Initialize Firebase Auth (defaults to persistent IndexedDB/localStorage automatically)
+export const auth = getAuth(app);
 
 // Initialize Firestore with named database and offline persistence
 const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
@@ -125,18 +108,12 @@ export const appleProvider = new OAuthProvider('apple.com');
 appleProvider.addScope('email');
 appleProvider.addScope('name');
 
-// Auth actions
+// Auth actions: synchronous user gesture execution for reliable popup authorization across all browsers
 export async function signInWithGoogle() {
-  if (typeof window !== 'undefined') {
-    await setPersistence(auth, browserLocalPersistence).catch(() => {});
-  }
   return await signInWithPopup(auth, googleProvider);
 }
 
 export async function signInWithApple() {
-  if (typeof window !== 'undefined') {
-    await setPersistence(auth, browserLocalPersistence).catch(() => {});
-  }
   return await signInWithPopup(auth, appleProvider);
 }
 

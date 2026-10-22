@@ -262,7 +262,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return '';
     }
     if (msg.includes('auth/popup-blocked')) {
-      return 'El navegador bloqueó la ventana emergente. Por favor, habilita las ventanas emergentes para este sitio.';
+      return 'El navegador bloqueó la ventana emergente de Google. Por favor, toca "Permitir ventanas emergentes" o intenta presionar nuevamente el botón.';
+    }
+    if (msg.includes('auth/unauthorized-domain')) {
+      return 'El dominio actual no está en la lista de dominios autorizados de Firebase Authentication. Ve a Firebase Console > Authentication > Settings > Authorized Domains y agrega este dominio.';
     }
     if (msg.includes('auth/credential-already-in-use')) {
       return 'Esta credencial ya está vinculada a otra cuenta de NITA.';
@@ -302,9 +305,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           })) || [{ providerId: 'google.com' }],
           isOfflineSession: false,
         };
-        localStorage.setItem(NITA_AUTH_CHOICE_KEY, choice);
-        localStorage.setItem(NITA_CACHED_USER_KEY, JSON.stringify(cached));
-        localStorage.removeItem(NITA_GUEST_MODE_KEY);
+        try {
+          localStorage.setItem(NITA_AUTH_CHOICE_KEY, choice);
+          localStorage.setItem(NITA_CACHED_USER_KEY, JSON.stringify(cached));
+          localStorage.removeItem(NITA_GUEST_MODE_KEY);
+        } catch (e) {
+          console.warn('Could not persist auth choice:', e);
+        }
         setAuthChoice(choice);
         setCachedUser(cached);
         setUser(res.user as NitaUser);
@@ -342,9 +349,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           })) || [{ providerId: 'apple.com' }],
           isOfflineSession: false,
         };
-        localStorage.setItem(NITA_AUTH_CHOICE_KEY, choice);
-        localStorage.setItem(NITA_CACHED_USER_KEY, JSON.stringify(cached));
-        localStorage.removeItem(NITA_GUEST_MODE_KEY);
+        try {
+          localStorage.setItem(NITA_AUTH_CHOICE_KEY, choice);
+          localStorage.setItem(NITA_CACHED_USER_KEY, JSON.stringify(cached));
+          localStorage.removeItem(NITA_GUEST_MODE_KEY);
+        } catch (e) {
+          console.warn('Could not persist auth choice:', e);
+        }
         setAuthChoice(choice);
         setCachedUser(cached);
         setUser(res.user as NitaUser);
