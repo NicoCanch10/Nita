@@ -53,7 +53,7 @@ service cloud.firestore {
         && exp.amount is number && exp.amount >= 0
         && exp.category is string && exp.category.size() <= 64
         && exp.isPaid is bool
-        && (!('dueDate' in exp) || (exp.dueDate is int && exp.dueDate >= 1 && exp.dueDate <= 31))
+        && (!('dueDate' in exp) || ((exp.dueDate is int || exp.dueDate is number) && exp.dueDate >= 1 && exp.dueDate <= 31))
         && (!('notes' in exp) || (exp.notes is string && exp.notes.size() <= 500));
     }
 
@@ -151,8 +151,8 @@ service cloud.firestore {
             'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt'
           ])
           // Validar coherencia temporal estricta entre monthKey, year y month
-          && incoming().year is int && incoming().year >= 2000 && incoming().year <= 2100
-          && incoming().month is int && incoming().month >= 0 && incoming().month <= 11
+          && (incoming().year is int || incoming().year is number) && incoming().year >= 2000 && incoming().year <= 2100
+          && (incoming().month is int || incoming().month is number) && incoming().month >= 0 && incoming().month <= 11
           && (
             (incoming().month < 9 && monthKey == string(incoming().year) + '-0' + string(incoming().month + 1))
             || (incoming().month >= 9 && monthKey == string(incoming().year) + '-' + string(incoming().month + 1))
@@ -163,8 +163,8 @@ service cloud.firestore {
           && areValidCategories(incoming().categories)
           && areValidFixedExpenses(incoming().fixedExpenses)
           && areValidVariableExpenses(incoming().variableExpenses)
-          && incoming().jarAdjustments is map
-          && isValidJarLog(incoming().lastJarAdjustmentLog)
+          && (!('jarAdjustments' in incoming()) || incoming().jarAdjustments is map)
+          && (!('lastJarAdjustmentLog' in incoming()) || isValidJarLog(incoming().lastJarAdjustmentLog))
           && (!('updatedAt' in incoming()) || isValidTimestamp(incoming().updatedAt));
       }
     }
