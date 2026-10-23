@@ -81,7 +81,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { isInstalled } = usePWAInstall();
-  const { user, signOutUser, isGoogleLinked, isAppleLinked, isGuestMode, exitGuestMode } = useAuth();
+  const { user, signOutUser, isGoogleLinked, isAppleLinked, isGuestMode, exitGuestMode, isFirebaseAuthActive, signInWithGoogle } = useAuth();
 
   // Language state
   const [internalLanguage, setInternalLanguage] = useState(() => loadSelectedLanguage());
@@ -548,8 +548,12 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     <Cloud className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                     <span>Cuenta y Sincronización</span>
                   </span>
-                  <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-100/70 dark:bg-emerald-950/70 px-1.5 py-0.5 rounded">
-                    EN LÍNEA
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                    isFirebaseAuthActive 
+                      ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/70' 
+                      : 'text-amber-700 dark:text-amber-400 bg-amber-100/80 dark:bg-amber-950/70'
+                  }`}>
+                    {isFirebaseAuthActive ? 'EN LÍNEA ✓' : 'POR VALIDAR'}
                   </span>
                 </label>
                 <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-2 text-2xs">
@@ -568,13 +572,35 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     </div>
                   )}
                   <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[10px]">
-                    <span className="text-slate-500 dark:text-slate-400">Acceso:</span>
+                    <span className="text-slate-500 dark:text-slate-400">Estado:</span>
                     <div className="flex items-center gap-1.5 font-bold">
-                      {isGoogleLinked && <span className="text-blue-600 dark:text-blue-400">Google ✓</span>}
-                      {isAppleLinked && <span className="text-slate-800 dark:text-slate-200">Apple ✓</span>}
+                      {isFirebaseAuthActive ? (
+                        <span className="text-emerald-600 dark:text-emerald-400">Sincronización activa ✓</span>
+                      ) : (
+                        <span className="text-amber-600 dark:text-amber-400">Requiere validar Google</span>
+                      )}
                     </div>
                   </div>
                 </div>
+
+                {!isFirebaseAuthActive && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsOpen(false);
+                      try {
+                        await signInWithGoogle();
+                      } catch (e) {
+                        console.warn('Google validation error:', e);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition-colors cursor-pointer text-2xs shadow-xs"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>Conectar y validar con Google</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={async () => {

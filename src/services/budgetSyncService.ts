@@ -299,7 +299,20 @@ export async function fetchAndSyncUserData(
     if (localBudgetState.monthsData) {
       for (const [mKey, localData] of Object.entries(localBudgetState.monthsData)) {
         if (pendingMonthKeys.has(mKey) && localData) {
-          finalMonths[mKey] = localData;
+          const remoteMonth = remoteMonths[mKey];
+          if (!remoteMonth) {
+            finalMonths[mKey] = localData;
+          } else {
+            const remoteVarIds = new Set((remoteMonth.variableExpenses || []).map(e => e.id));
+            const remoteFixIds = new Set((remoteMonth.fixedExpenses || []).map(e => e.id));
+            const pendingVar = (localData.variableExpenses || []).filter(e => !remoteVarIds.has(e.id));
+            const pendingFix = (localData.fixedExpenses || []).filter(e => !remoteFixIds.has(e.id));
+            finalMonths[mKey] = {
+              ...remoteMonth,
+              variableExpenses: [...(remoteMonth.variableExpenses || []), ...pendingVar],
+              fixedExpenses: [...(remoteMonth.fixedExpenses || []), ...pendingFix],
+            };
+          }
         }
       }
     }

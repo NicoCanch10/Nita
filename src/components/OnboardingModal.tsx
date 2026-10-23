@@ -973,17 +973,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
   const currentStep = steps[activeStepIndex] || steps[0];
 
-  const swipeHints: Record<string, string> = {
-    es: '← Desliza con el dedo para navegar entre pasos →',
-    en: '← Swipe with finger to switch steps →',
-    ca: '← Llisca amb el dit per navegar entre passos →',
-    pt: '← Deslize com o dedo para navegar entre passos →',
-    fr: '← Glissez avec le doigt pour naviguer entre les étapes →',
-    it: '← Scorri con il dito per navigare tra i passaggi →',
-    de: '← Mit dem Finger wischen, um zwischen Schritten zu wechseln →',
-  };
-  const swipeHint = swipeHints[language] || swipeHints.es;
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] transition-colors">
@@ -1089,11 +1078,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <span>{currentStep.tip}</span>
               </div>
             )}
-
-            {/* Swipe hint */}
-            <div className="pt-1 flex items-center justify-center text-3xs text-slate-400 dark:text-slate-500 font-medium select-none">
-              <span>{swipeHint}</span>
-            </div>
           </div>
         </div>
 

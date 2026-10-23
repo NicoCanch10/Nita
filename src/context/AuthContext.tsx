@@ -37,6 +37,7 @@ interface AuthContextValue {
   authChoice: AuthChoice;
   isOnline: boolean;
   isOfflineSession: boolean;
+  isFirebaseAuthActive: boolean;
   continueWithoutAccount: () => void;
   exitGuestMode: () => void;
   clearAuthError: () => void;
@@ -116,16 +117,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   });
 
-  // Loading state: if we already have the remembered user in local device storage, don't block with loading screen
+  // Loading state: wait for Firebase Auth onAuthStateChanged to resolve auth.currentUser so Firestore permissions succeed
   const [loading, setLoading] = useState<boolean>(() => {
     const initialChoice = getInitialAuthChoice();
-    const initialCached = getInitialCachedUser();
     if (initialChoice === 'offline') return false;
-    if (initialCached && (initialChoice === 'google' || initialChoice === 'apple')) return false;
+    // Only skip loading if explicitly offline without internet
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const initialCached = getInitialCachedUser();
+      if (initialCached && (initialChoice === 'google' || initialChoice === 'apple')) return false;
+    }
     return true;
   });
 
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isFirebaseAuthActive, setIsFirebaseAuthActive] = useState<boolean>(() => Boolean(auth.currentUser));
 
   // Monitor network connection online / offline status
   useEffect(() => {
@@ -162,7 +167,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Firebase auth state listener: authoritative source of truth for user authentication
   useEffect(() => {
+    // Safety timeout: if onAuthStateChanged takes more than 1500ms on startup, release loading to cached state
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      clearTimeout(safetyTimer);
       if (currentUser) {
         // Genuine Firebase authenticated user
         const providerId = currentUser.providerData?.[0]?.providerId || '';
@@ -195,9 +206,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCachedUser(cached);
         setUser(currentUser as NitaUser);
         setIsGuestMode(false);
+        setIsFirebaseAuthActive(true);
         setLoading(false);
       } else {
         // Firebase auth state callback with null (e.g. offline, startup recovery delay, or network drop)
+        setIsFirebaseAuthActive(false);
         const savedChoice = getInitialAuthChoice();
         const existingCached = getInitialCachedUser();
 
@@ -223,7 +236,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(safetyTimer);
+      unsubscribe();
+    };
   }, []);
 
   const continueWithoutAccount = () => {
@@ -316,6 +332,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCachedUser(cached);
         setUser(res.user as NitaUser);
         setIsGuestMode(false);
+        setIsFirebaseAuthActive(true);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -360,6 +377,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCachedUser(cached);
         setUser(res.user as NitaUser);
         setIsGuestMode(false);
+        setIsFirebaseAuthActive(true);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -392,6 +410,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await fbLinkGoogle(user as User);
       setUser(res.user as NitaUser);
+      setIsFirebaseAuthActive(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
@@ -409,6 +428,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await fbLinkApple(user as User);
       setUser(res.user as NitaUser);
+      setIsFirebaseAuthActive(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
@@ -444,6 +464,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthChoice(null);
     setCachedUser(null);
     setIsGuestMode(false);
+    setIsFirebaseAuthActive(false);
     setUser(null);
     try {
       await fbLogOut();
@@ -476,6 +497,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         authChoice,
         isOnline,
         isOfflineSession,
+        isFirebaseAuthActive,
         continueWithoutAccount,
         exitGuestMode,
         clearAuthError,

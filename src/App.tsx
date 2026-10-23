@@ -73,7 +73,7 @@ import {
 
 function MainApp() {
   // Authentication & Multi-user state (supports logged in user & guest mode without account)
-  const { user, loading: isAuthLoading, isGuestMode, isOnline, isOfflineSession } = useAuth();
+  const { user, loading: isAuthLoading, isGuestMode, isOnline, isOfflineSession, isFirebaseAuthActive } = useAuth();
   const isRemoteSyncRef = useRef(false);
   const isFlushingRef = useRef(false);
   const pendingExpenseIdsRef = useRef<Set<string>>(new Set());
@@ -169,7 +169,7 @@ function MainApp() {
 
   // Track cloud synchronization status across devices
   const [isCloudSyncReady, setIsCloudSyncReady] = useState<boolean>(!user || isOfflineSession || !isOnline);
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error' | 'offline'>(
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error' | 'offline' | 'unauthenticated'>(
     !isOnline || isOfflineSession ? 'offline' : 'idle'
   );
 
@@ -185,6 +185,12 @@ function MainApp() {
     if (!isOnline || isOfflineSession) {
       setIsCloudSyncReady(true);
       setSyncStatus('offline');
+      return;
+    }
+
+    if (!isFirebaseAuthActive) {
+      setIsCloudSyncReady(true);
+      setSyncStatus('unauthenticated');
       return;
     }
 
@@ -222,7 +228,7 @@ function MainApp() {
     return () => {
       isMounted = false;
     };
-  }, [user?.uid, isOnline, isOfflineSession]);
+  }, [user?.uid, isOnline, isOfflineSession, isFirebaseAuthActive]);
 
   const monthsDataRef = useRef(monthsData);
   monthsDataRef.current = monthsData;
@@ -239,7 +245,7 @@ function MainApp() {
   // Si la sincronización con Google falla o la conexión se interrumpe, se guarda
   // inmediatamente en cola local y se reintenta sincronizar automáticamente cada 5 segundos.
   useEffect(() => {
-    if (!user || isOfflineSession || !isCloudSyncReady) return;
+    if (!user || isOfflineSession || !isCloudSyncReady || !isFirebaseAuthActive) return;
 
     const flushQueue = async () => {
       // Evitar ejecuciones simultáneas
@@ -302,11 +308,11 @@ function MainApp() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       clearInterval(interval);
     };
-  }, [isOnline, user?.uid, isOfflineSession, isCloudSyncReady]);
+  }, [isOnline, user?.uid, isOfflineSession, isCloudSyncReady, isFirebaseAuthActive]);
 
   // Real-time Firestore subscriptions across devices (Simultaneous viewing and instant live reflection)
   useEffect(() => {
-    if (!user || !isOnline || isOfflineSession) return;
+    if (!user || !isOnline || isOfflineSession || !isFirebaseAuthActive) return;
 
     // 1. Months collection real-time subscription
     const unsubMonths = subscribeToUserMonths(user.uid, (remoteMonths, hasPendingWrites) => {
@@ -330,11 +336,6 @@ function MainApp() {
             const localData = prev[mKey];
             if (!localData) {
               updated[mKey] = remoteData;
-              continue;
-            }
-
-            // If this month has pending offline sync edits, preserve local data
-            if (pendingMonthKeys.has(mKey)) {
               continue;
             }
 
@@ -412,7 +413,7 @@ function MainApp() {
       unsubCategories();
       unsubProfile();
     };
-  }, [user?.uid]);
+  }, [user?.uid, isOnline, isOfflineSession, isCloudSyncReady, isFirebaseAuthActive]);
 
   const t = useMemo(() => getTranslations(language), [language]);
   const monthNames = useMemo(() => t.months || MONTH_NAMES_ES, [t]);
@@ -462,10 +463,14 @@ function MainApp() {
       if (user && isCloudSyncReady) {
         const currentData = monthsData[currentKey];
         if (currentData) {
-          if (!isOnline || isOfflineSession) {
-            // Disconnected or offline session: enqueue immediately into persistent pending queue
+          if (!isOnline || isOfflineSession || !isFirebaseAuthActive) {
+            // Disconnected, offline session, or unauthenticated: enqueue immediately into persistent pending queue
             enqueuePendingMonth(user.uid, currentKey, year, month, currentData);
-            setSyncStatus('offline');
+            if (!isOnline || isOfflineSession) {
+              setSyncStatus('offline');
+            } else if (!isFirebaseAuthActive) {
+              setSyncStatus('unauthenticated');
+            }
           } else {
             setSyncStatus('syncing');
             saveMonthToFirestore(user.uid, currentKey, year, month, currentData)
@@ -868,14 +873,21 @@ function MainApp() {
       id: `f_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     };
     pendingFixedIdsRef.current.add(newExpense.id);
+    let targetUpdated: MonthData | null = null;
     updateActiveMonth(m => {
       const updated: MonthData = {
         ...m,
         fixedExpenses: [...m.fixedExpenses, newExpense],
       };
-      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+      targetUpdated = updated;
+      return updated;
+    });
+
+    if (user && targetUpdated) {
+      const toSave: MonthData = targetUpdated;
+      if (isCloudSyncReady && isOnline && !isOfflineSession) {
         setSyncStatus('syncing');
-        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+        saveMonthToFirestore(user.uid, currentKey, year, month, toSave)
           .then(() => {
             pendingFixedIdsRef.current.delete(newExpense.id);
             removePendingMonthFromQueue(user.uid, currentKey);
@@ -883,90 +895,107 @@ function MainApp() {
           })
           .catch(err => {
             console.warn('Sync to Google interrupted for fixed expense, queueing:', err);
-            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
             setSyncStatus(isOnline ? 'error' : 'offline');
           });
-      } else if (user) {
-        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      } else {
+        enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
       }
-      return updated;
-    });
+    }
   };
 
   const handleDeleteFixedExpense = (id: string) => {
     pendingFixedIdsRef.current.delete(id);
+    let targetUpdated: MonthData | null = null;
     updateActiveMonth(m => {
       const updated: MonthData = {
         ...m,
         fixedExpenses: m.fixedExpenses.filter(e => e.id !== id),
       };
-      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+      targetUpdated = updated;
+      return updated;
+    });
+
+    if (user && targetUpdated) {
+      const toSave: MonthData = targetUpdated;
+      if (isCloudSyncReady && isOnline && !isOfflineSession) {
         setSyncStatus('syncing');
-        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+        saveMonthToFirestore(user.uid, currentKey, year, month, toSave)
           .then(() => {
             removePendingMonthFromQueue(user.uid, currentKey);
             setSyncStatus('synced');
           })
           .catch(err => {
             console.warn('Sync to Google interrupted for delete fixed expense, queueing:', err);
-            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
             setSyncStatus(isOnline ? 'error' : 'offline');
           });
-      } else if (user) {
-        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      } else {
+        enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
       }
-      return updated;
-    });
+    }
   };
 
   const handleToggleFixedExpensePaid = (id: string) => {
+    let targetUpdated: MonthData | null = null;
     updateActiveMonth(m => {
       const updated: MonthData = {
         ...m,
         fixedExpenses: m.fixedExpenses.map(e => e.id === id ? { ...e, isPaid: !e.isPaid } : e),
       };
-      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+      targetUpdated = updated;
+      return updated;
+    });
+
+    if (user && targetUpdated) {
+      const toSave: MonthData = targetUpdated;
+      if (isCloudSyncReady && isOnline && !isOfflineSession) {
         setSyncStatus('syncing');
-        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+        saveMonthToFirestore(user.uid, currentKey, year, month, toSave)
           .then(() => {
             removePendingMonthFromQueue(user.uid, currentKey);
             setSyncStatus('synced');
           })
           .catch(err => {
             console.warn('Sync to Google interrupted for toggle paid fixed expense, queueing:', err);
-            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
             setSyncStatus(isOnline ? 'error' : 'offline');
           });
-      } else if (user) {
-        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      } else {
+        enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
       }
-      return updated;
-    });
+    }
   };
 
   const handleUpdateFixedExpense = (id: string, updatedFields: Partial<FixedExpense>) => {
+    let targetUpdated: MonthData | null = null;
     updateActiveMonth(m => {
       const updated: MonthData = {
         ...m,
         fixedExpenses: m.fixedExpenses.map(e => e.id === id ? { ...e, ...updatedFields } : e),
       };
-      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+      targetUpdated = updated;
+      return updated;
+    });
+
+    if (user && targetUpdated) {
+      const toSave: MonthData = targetUpdated;
+      if (isCloudSyncReady && isOnline && !isOfflineSession) {
         setSyncStatus('syncing');
-        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+        saveMonthToFirestore(user.uid, currentKey, year, month, toSave)
           .then(() => {
             removePendingMonthFromQueue(user.uid, currentKey);
             setSyncStatus('synced');
           })
           .catch(err => {
             console.warn('Sync to Google interrupted for update fixed expense, queueing:', err);
-            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
             setSyncStatus(isOnline ? 'error' : 'offline');
           });
-      } else if (user) {
-        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      } else {
+        enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
       }
-      return updated;
-    });
+    }
   };
 
   const handleAddVariableExpense = (expense: Omit<VariableExpense, 'id'>) => {
@@ -983,6 +1012,7 @@ function MainApp() {
     };
 
     pendingExpenseIdsRef.current.add(newExpense.id);
+    let targetUpdated: MonthData | null = null;
 
     setMonthsData(prevMap => {
       const current = prevMap[targetKey] || createFreshMonthData(categories);
@@ -990,6 +1020,7 @@ function MainApp() {
         ...current,
         variableExpenses: [...current.variableExpenses, newExpense],
       };
+      targetUpdated = updated;
       const nextMap = {
         ...prevMap,
         [targetKey]: updated,
@@ -1002,9 +1033,14 @@ function MainApp() {
         monthsData: nextMap,
       }, user?.uid, isGuestMode);
 
-      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+      return nextMap;
+    });
+
+    if (user && targetUpdated) {
+      const toSave: MonthData = targetUpdated;
+      if (isCloudSyncReady && isOnline && !isOfflineSession) {
         setSyncStatus('syncing');
-        saveMonthToFirestore(user.uid, targetKey, expYear, expMonth - 1, updated)
+        saveMonthToFirestore(user.uid, targetKey, expYear, expMonth - 1, toSave)
           .then(() => {
             pendingExpenseIdsRef.current.delete(newExpense.id);
             removePendingMonthFromQueue(user.uid, targetKey);
@@ -1012,41 +1048,45 @@ function MainApp() {
           })
           .catch(err => {
             console.warn('Sync to Google interrupted for variable expense, queueing:', err);
-            enqueuePendingMonth(user.uid, targetKey, expYear, expMonth - 1, updated);
+            enqueuePendingMonth(user.uid, targetKey, expYear, expMonth - 1, toSave);
             setSyncStatus(isOnline ? 'error' : 'offline');
           });
-      } else if (user) {
-        enqueuePendingMonth(user.uid, targetKey, expYear, expMonth - 1, updated);
+      } else {
+        enqueuePendingMonth(user.uid, targetKey, expYear, expMonth - 1, toSave);
       }
-
-      return nextMap;
-    });
+    }
   };
 
   const handleDeleteVariableExpense = (id: string) => {
     pendingExpenseIdsRef.current.delete(id);
+    let targetUpdated: MonthData | null = null;
     updateActiveMonth(m => {
       const updated: MonthData = {
         ...m,
         variableExpenses: m.variableExpenses.filter(e => e.id !== id),
       };
-      if (user && isCloudSyncReady && isOnline && !isOfflineSession) {
+      targetUpdated = updated;
+      return updated;
+    });
+
+    if (user && targetUpdated) {
+      const toSave: MonthData = targetUpdated;
+      if (isCloudSyncReady && isOnline && !isOfflineSession) {
         setSyncStatus('syncing');
-        saveMonthToFirestore(user.uid, currentKey, year, month, updated)
+        saveMonthToFirestore(user.uid, currentKey, year, month, toSave)
           .then(() => {
             removePendingMonthFromQueue(user.uid, currentKey);
             setSyncStatus('synced');
           })
           .catch(err => {
             console.warn('Sync to Google interrupted for delete variable expense, queueing:', err);
-            enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+            enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
             setSyncStatus(isOnline ? 'error' : 'offline');
           });
-      } else if (user) {
-        enqueuePendingMonth(user.uid, currentKey, year, month, updated);
+      } else {
+        enqueuePendingMonth(user.uid, currentKey, year, month, toSave);
       }
-      return updated;
-    });
+    }
   };
 
   // Optional manual helper: copy fixed expenses and categories from previous month
@@ -1145,18 +1185,6 @@ function MainApp() {
       {/* Main Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-28 sm:pb-6 space-y-6">
         
-        {/* Urgent Due Dates Alert Banner (Centered on mobile, respects alert preferences) */}
-        <DueAlertBanner
-          expenses={fixedExpenses}
-          currency={currency}
-          currentDay={currentDay}
-          onTogglePaid={handleToggleFixedExpensePaid}
-          alertSettings={alertSettings}
-          language={language}
-          year={year}
-          month={month}
-        />
-        
         {/* Desktop Navigation Tabs Bar (Visible únicamente en pantallas medianas y de escritorio: sm en adelante) */}
         <div className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-1.5 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-xs transition-colors">
           <button
@@ -1228,6 +1256,18 @@ function MainApp() {
         {/* View Layout Switcher */}
         {activeTab === 'all' && (
           <div className="space-y-6">
+            {/* Urgent Due Dates Alert Banner (Visible exclusivamente en Vista Completa) */}
+            <DueAlertBanner
+              expenses={fixedExpenses}
+              currency={currency}
+              currentDay={currentDay}
+              onTogglePaid={handleToggleFixedExpensePaid}
+              alertSettings={alertSettings}
+              language={language}
+              year={year}
+              month={month}
+            />
+
             {/* Optional Manual Clone Banner if current month is empty and previous month has data */}
             {fixedExpenses.length === 0 && previousMonthData && previousMonthData.fixedExpenses.length > 0 && (
               <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
