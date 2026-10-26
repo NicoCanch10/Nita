@@ -59,9 +59,9 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
       const msg = err instanceof Error ? err.message : String(err);
       console.warn('----------------------------------------------------------------------');
       console.warn('AVISO: El emulador local de Firestore no está disponible en este entorno.');
-      console.warn('Causa técnica: Java JRE/JDK no está instalado en este contenedor Linux.');
+      console.warn('Causa técnica: no se pudo inicializar o contactar el emulador de Firestore.');
       console.warn('Detalle:', msg);
-      console.warn('La suite real queda completamente preparada para ejecutarse en CI/CD o entorno con Java.');
+      console.warn('La suite real requiere que el emulador esté disponible; consulte el detalle técnico anterior.');
       console.warn('----------------------------------------------------------------------');
       if (process.env.STRICT_RULES_EMULATOR === 'true') {
         throw new Error(`[Strict Rules Mode] Emulador no disponible: ${msg}`);
@@ -84,7 +84,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('1. Acceso de propietario a su perfil (/users/{userId}) -> PERMITIDO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -104,7 +104,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('2. Acceso no autenticado a perfil (/users/{userId}) -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.unauthenticatedContext().firestore();
@@ -114,7 +114,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('3. Acceso cruzado: Usuario B intenta leer perfil de Usuario A -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_B').firestore();
@@ -124,7 +124,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('4. Usuario B intenta escribir en perfil de Usuario A -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_B').firestore();
@@ -139,7 +139,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('5. Inyección de campos protegidos (role: admin) en perfil -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -155,7 +155,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('6. Borrado de documento de usuario -> DENEGADO (Protección contra pérdida)', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -165,7 +165,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('7. Acceso legítimo a categorías globales (/users/{userId}/categories/global) -> PERMITIDO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -184,7 +184,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('8. Creación de subcolección de categorías con ID no global (/categories/spam) -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -200,7 +200,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('9. Guardado de mes legítimo con coherencia temporal (2026-10 con year: 2026, month: 9) -> PERMITIDO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -230,7 +230,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('10. Mes con incoherencia temporal (monthKey: 2026-10 pero year: 2025 o month: 4) -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -256,7 +256,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('11. Mes con ingreso negativo o tasa de ahorro > 100 -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -282,7 +282,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('12. Borrado de documento mensual -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -292,7 +292,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('13. Lista con elemento inválido en posición posterior a la primera (índice 1 con amount negativo) -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -321,7 +321,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('14. Gasto variable con fecha imposible en calendario (mes 13 o día 45) -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -349,7 +349,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('15. Inyección de campos adicionales no autorizados en mes -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -376,7 +376,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('16. Actualización legítima parcial con merge: true en perfil de usuario -> PERMITIDO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -402,7 +402,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('17. Intento de actualización con merge: true inyectando campo no autorizado -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -435,7 +435,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('19. Admisión de cada una de las 23 monedas válidas en perfil de usuario -> PERMITIDO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -460,7 +460,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('20. Rechazo de moneda GBP en perfil de usuario -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -476,7 +476,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('21. Rechazo de moneda inexistente/aleatoria (XYZ) en perfil de usuario -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
@@ -492,7 +492,7 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
 
   test('22. Rechazo de moneda en minúsculas (usd) en perfil de usuario -> DENEGADO', async (t) => {
     if (!isEmulatorAvailable || !testEnv) {
-      t.skip('Emulador de Firestore no disponible (requiere Java)');
+      t.skip('Emulador de Firestore no disponible en este entorno');
       return;
     }
     const db = testEnv.authenticatedContext('user_123').firestore();
