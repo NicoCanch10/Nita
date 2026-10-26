@@ -48,9 +48,11 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
           port,
         },
       });
-      // Ping check if emulator is responsive
-      const db = testEnv.unauthenticatedContext().firestore();
-      await getDoc(doc(db, 'ping', 'check'));
+      // Ping check if emulator is responsive using rules-disabled context
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await getDoc(doc(db, 'ping', 'check'));
+      });
       isEmulatorAvailable = true;
     } catch (err: unknown) {
       isEmulatorAvailable = false;
