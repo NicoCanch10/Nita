@@ -6,7 +6,9 @@ import {
   signInWithPopup, 
   signOut, 
   linkWithPopup, 
-  User 
+  User,
+  setPersistence,
+  browserLocalPersistence
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
@@ -15,15 +17,41 @@ import {
   getDocFromServer,
   persistentLocalCache,
   persistentMultipleTabManager,
+  setLogLevel,
   Firestore
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+// Configure Firestore SDK log level to 'error' to avoid benign sub-millisecond clock drift warnings in console
+setLogLevel('error');
+
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firebase Auth (defaults to persistent IndexedDB/localStorage automatically)
+// Initialize single Firebase Auth instance
 export const auth = getAuth(app);
+
+// Explicitly configure browserLocalPersistence to ensure Google session survives reloads, app restarts and device reboots
+let persistenceInitPromise: Promise<void> | null = null;
+
+export function ensureAuthPersistence(): Promise<void> {
+  if (!persistenceInitPromise) {
+    persistenceInitPromise = setPersistence(auth, browserLocalPersistence).catch((err) => {
+      console.error('[Firebase Auth] Failed to configure browserLocalPersistence:', err);
+      // Reset promise so subsequent user attempts can retry
+      persistenceInitPromise = null;
+      throw err;
+    });
+  }
+  return persistenceInitPromise;
+}
+
+// Early persistence configuration kick-off in browser environment
+if (typeof window !== 'undefined') {
+  ensureAuthPersistence().catch((err) => {
+    console.warn('[Firebase Auth] Early persistence setup warning:', err);
+  });
+}
 
 // Initialize Firestore with named database and offline persistence
 const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
@@ -89,13 +117,19 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Connection test as required by skill
+// Connection test as required by skill, guarded against offline PWA mode
 export async function testConnection(): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return;
+  }
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return;
+    }
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration or network connection.');
+      console.warn('Firebase configuration check: the client is currently offline.');
     }
   }
 }
@@ -110,18 +144,22 @@ appleProvider.addScope('name');
 
 // Auth actions: synchronous user gesture execution for reliable popup authorization across all browsers
 export async function signInWithGoogle() {
+  await ensureAuthPersistence();
   return await signInWithPopup(auth, googleProvider);
 }
 
 export async function signInWithApple() {
+  await ensureAuthPersistence();
   return await signInWithPopup(auth, appleProvider);
 }
 
 export async function linkGoogle(user: User) {
+  await ensureAuthPersistence();
   return await linkWithPopup(user, googleProvider);
 }
 
 export async function linkApple(user: User) {
+  await ensureAuthPersistence();
   return await linkWithPopup(user, appleProvider);
 }
 

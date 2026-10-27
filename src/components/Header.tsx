@@ -77,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLanguageChange,
   syncStatus = 'idle',
 }) => {
-  const { user, isFirebaseAuthActive, signInWithGoogle } = useAuth();
+  const { user, isFirebaseAuthActive, isOnline, isOfflineSession, signInWithGoogle } = useAuth();
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const t = getTranslations(language || 'es');
@@ -172,7 +172,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Simultaneous Multi-Device Sync Indicator / Interactive Connect Button */}
-            {user && !isFirebaseAuthActive ? (
+            {user && !isFirebaseAuthActive && isOnline && !isOfflineSession ? (
               <div className="relative inline-flex items-center">
                 <button
                   type="button"

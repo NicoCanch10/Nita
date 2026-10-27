@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { 
   auth, 
+  ensureAuthPersistence,
   signInWithGoogle as fbSignInWithGoogle, 
   signInWithApple as fbSignInWithApple, 
   linkGoogle as fbLinkGoogle, 
@@ -111,20 +112,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<NitaUser | null>(() => {
     const initialChoice = getInitialAuthChoice();
     const initialCached = getInitialCachedUser();
-    if (initialCached && (initialChoice === 'google' || initialChoice === 'apple')) {
-      return synthesizeUser(initialCached, typeof navigator !== 'undefined' ? !navigator.onLine : false);
+    // In pure offline scenarios without network, prime with local cached identity
+    if (typeof navigator !== 'undefined' && !navigator.onLine && initialCached && (initialChoice === 'google' || initialChoice === 'apple')) {
+      return synthesizeUser(initialCached, true);
     }
     return null;
   });
 
-  // Loading state: wait for Firebase Auth onAuthStateChanged to resolve auth.currentUser so Firestore permissions succeed
+  // Loading state: always wait for Firebase Auth onAuthStateChanged/authStateReady to resolve persistent session
   const [loading, setLoading] = useState<boolean>(() => {
     const initialChoice = getInitialAuthChoice();
+    // Only skip loading if explicitly in guest mode without account
     if (initialChoice === 'offline') return false;
-    // Only skip loading if explicitly offline without internet
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      const initialCached = getInitialCachedUser();
-      if (initialCached && (initialChoice === 'google' || initialChoice === 'apple')) return false;
+    // If device is offline and we already have cached user profile, allow immediate start without blocking UI
+    if (typeof navigator !== 'undefined' && !navigator.onLine && getInitialCachedUser()) {
+      return false;
     }
     return true;
   });
@@ -136,13 +138,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      setUser(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          isOfflineSession: false,
-        } as NitaUser;
-      });
+      if (auth.currentUser) {
+        setIsFirebaseAuthActive(true);
+        setUser(auth.currentUser as NitaUser);
+      } else {
+        setUser(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            isOfflineSession: false,
+          } as NitaUser;
+        });
+      }
     };
 
     const handleOffline = () => {
@@ -167,15 +174,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Firebase auth state listener: authoritative source of truth for user authentication
   useEffect(() => {
-    // Safety timeout: if onAuthStateChanged takes more than 1500ms on startup, release loading to cached state
+    let isMounted = true;
+
+    // Safety fallback timeout: if browser storage is hanging or blocked, release loading after 8s (or 1.5s when offline)
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const safetyTimeoutMs = isOffline ? 1500 : 8000;
     const safetyTimer = setTimeout(() => {
+      if (!isMounted) return;
+      console.warn('[AuthContext] Firebase auth resolution safety timer reached limit');
       setLoading(false);
-    }, 1500);
+    }, safetyTimeoutMs);
+
+    // Coordinate with persistence initialization and authStateReady()
+    ensureAuthPersistence()
+      .then(() => {
+        if (typeof (auth as any).authStateReady === 'function') {
+          return (auth as any).authStateReady();
+        }
+      })
+      .catch((err) => {
+        console.warn('[AuthContext] Persistence / authStateReady warning:', err);
+      });
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!isMounted) return;
       clearTimeout(safetyTimer);
+
       if (currentUser) {
-        // Genuine Firebase authenticated user
+        // Genuine Firebase authenticated user restored from browserLocalPersistence
         const providerId = currentUser.providerData?.[0]?.providerId || '';
         const choice: AuthChoice = providerId.includes('apple') ? 'apple' : 'google';
 
@@ -209,7 +235,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsFirebaseAuthActive(true);
         setLoading(false);
       } else {
-        // Firebase auth state callback with null (e.g. offline, startup recovery delay, or network drop)
+        // Firebase has determined that no active Firebase Auth session exists in this browser instance
         setIsFirebaseAuthActive(false);
         const savedChoice = getInitialAuthChoice();
         const existingCached = getInitialCachedUser();
@@ -220,13 +246,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsGuestMode(true);
           setLoading(false);
         } else if (existingCached && (savedChoice === 'google' || savedChoice === 'apple')) {
-          // El usuario tiene su cuenta guardada y recordada en este dispositivo y NO solicitó cerrar sesión.
-          // Mantenemos la sesión activa de forma permanente en el dispositivo.
-          const rememberedUser = synthesizeUser(existingCached, typeof navigator !== 'undefined' ? !navigator.onLine : false);
-          setUser(rememberedUser);
-          setCachedUser(existingCached);
-          setIsGuestMode(false);
-          setLoading(false);
+          const isCurrentlyOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+          if (isCurrentlyOffline) {
+            // Offline fallback: allow access to previously saved local data without inventing a fake Firebase session
+            const offlineUser = synthesizeUser(existingCached, true);
+            setUser(offlineUser);
+            setCachedUser(existingCached);
+            setIsGuestMode(false);
+            setLoading(false);
+          } else {
+            // Online: Firebase verified there is no authenticated session.
+            // Do not invent a fake online session; present login screen safely.
+            setUser(null);
+            setIsGuestMode(false);
+            setLoading(false);
+          }
         } else {
           setUser(null);
           setCachedUser(null);
@@ -237,6 +271,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => {
+      isMounted = false;
       clearTimeout(safetyTimer);
       unsubscribe();
     };
@@ -291,6 +326,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     if (msg.includes('auth/network-request-failed') || msg.includes('the client is offline')) {
       return 'No hay conexión a internet disponible. Puedes "Ingresar sin cuenta" para utilizar NITA de forma offline y sincronizar después.';
+    }
+    if (msg.includes('persistence') || msg.includes('unsupported-persistence-type')) {
+      return 'No se pudo configurar el almacenamiento local seguro para la sesión en este navegador. Verifica los permisos de almacenamiento y cookies.';
     }
     if (msg.includes('auth/operation-not-allowed') || msg.includes('auth/configuration-not-found')) {
       if (provider === 'apple' || msg.toLowerCase().includes('apple')) {

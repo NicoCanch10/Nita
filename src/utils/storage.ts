@@ -52,6 +52,7 @@ export interface PendingSyncItem {
   id: string;
   userId: string;
   type: 'month' | 'categories' | 'preferences';
+  opId?: string;
   monthKey?: string;
   year?: number;
   month?: number;
@@ -59,6 +60,10 @@ export interface PendingSyncItem {
   categories?: CategoryInfo[];
   preferences?: { currency?: CurrencyCode; language?: string };
   timestamp: number;
+}
+
+export function generateOpId(): string {
+  return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
 export function getPendingSyncQueue(userId?: string): PendingSyncItem[] {
@@ -77,11 +82,13 @@ export function getPendingSyncQueue(userId?: string): PendingSyncItem[] {
   }
 }
 
-export function savePendingSyncQueue(queue: PendingSyncItem[]): void {
+export function savePendingSyncQueue(queue: PendingSyncItem[]): boolean {
   try {
     localStorage.setItem(PENDING_SYNC_QUEUE_KEY, JSON.stringify(queue));
+    return true;
   } catch (e) {
     console.error('Error saving pending sync queue:', e);
+    return false;
   }
 }
 
@@ -90,8 +97,10 @@ export function enqueuePendingMonth(
   monthKey: string,
   year: number,
   month: number,
-  data: MonthData
-): void {
+  data: MonthData,
+  opId?: string
+): string | null {
+  const finalOpId = opId || generateOpId();
   try {
     const currentQueue = getPendingSyncQueue();
     const id = `${userId}_month_${monthKey}`;
@@ -99,6 +108,7 @@ export function enqueuePendingMonth(
       id,
       userId,
       type: 'month',
+      opId: finalOpId,
       monthKey,
       year,
       month,
@@ -108,13 +118,23 @@ export function enqueuePendingMonth(
     // Upsert: replace previous pending copy of this month with latest state
     const filtered = currentQueue.filter(q => q.id !== id);
     filtered.push(item);
-    savePendingSyncQueue(filtered);
+    const persisted = savePendingSyncQueue(filtered);
+    if (!persisted) {
+      return null;
+    }
+    return finalOpId;
   } catch (e) {
     console.error('Error enqueuing pending month:', e);
+    return null;
   }
 }
 
-export function enqueuePendingCategories(userId: string, categories: CategoryInfo[]): void {
+export function enqueuePendingCategories(
+  userId: string, 
+  categories: CategoryInfo[],
+  opId?: string
+): string | null {
+  const finalOpId = opId || generateOpId();
   try {
     const currentQueue = getPendingSyncQueue();
     const id = `${userId}_categories`;
@@ -122,21 +142,29 @@ export function enqueuePendingCategories(userId: string, categories: CategoryInf
       id,
       userId,
       type: 'categories',
+      opId: finalOpId,
       categories,
       timestamp: Date.now(),
     };
     const filtered = currentQueue.filter(q => q.id !== id);
     filtered.push(item);
-    savePendingSyncQueue(filtered);
+    const persisted = savePendingSyncQueue(filtered);
+    if (!persisted) {
+      return null;
+    }
+    return finalOpId;
   } catch (e) {
     console.error('Error enqueuing pending categories:', e);
+    return null;
   }
 }
 
 export function enqueuePendingPreferences(
   userId: string,
-  preferences: { currency?: CurrencyCode; language?: string }
-): void {
+  preferences: { currency?: CurrencyCode; language?: string },
+  opId?: string
+): string | null {
+  const finalOpId = opId || generateOpId();
   try {
     const currentQueue = getPendingSyncQueue();
     const id = `${userId}_preferences`;
@@ -144,29 +172,77 @@ export function enqueuePendingPreferences(
       id,
       userId,
       type: 'preferences',
+      opId: finalOpId,
       preferences,
       timestamp: Date.now(),
     };
     const filtered = currentQueue.filter(q => q.id !== id);
     filtered.push(item);
-    savePendingSyncQueue(filtered);
+    const persisted = savePendingSyncQueue(filtered);
+    if (!persisted) {
+      return null;
+    }
+    return finalOpId;
   } catch (e) {
     console.error('Error enqueuing pending preferences:', e);
+    return null;
+  }
+}
+
+export function removePendingSyncItemIfMatch(itemId: string, expectedOpId?: string | null): boolean {
+  try {
+    const currentQueue = getPendingSyncQueue();
+    const currentItem = currentQueue.find(q => q.id === itemId);
+    if (!currentItem) return false;
+
+    // Regla de seguridad estricta:
+    // 1. Si se proporciona expectedOpId (no null ni undefined):
+    //    Solo se remueve si currentItem.opId coincide exactamente.
+    //    Si currentItem no tiene opId (legacy), se trata como discrepancia y se conserva.
+    const targetOpId = (expectedOpId !== null && expectedOpId !== undefined) ? expectedOpId : undefined;
+    if (targetOpId !== undefined) {
+      if (currentItem.opId !== targetOpId) {
+        return false;
+      }
+    } else {
+      // 2. Si NO se proporciona expectedOpId (operación antigua/legacy que no conocía opId):
+      //    Solo se permite remover si currentItem en la cola TAMPOCO tiene opId.
+      //    Si currentItem tiene un opId (nueva mutación ocurrida durante el await),
+      //    la operación antigua sin opId NO puede eliminarla.
+      if (currentItem.opId !== undefined) {
+        return false;
+      }
+    }
+
+    const filtered = currentQueue.filter(q => q.id !== itemId);
+    return savePendingSyncQueue(filtered);
+  } catch (e) {
+    console.error('Error conditionally removing pending sync item:', e);
+    return false;
+  }
+}
+
+/**
+ * Eliminación incondicional explícita para compatibilidad o limpieza manual,
+ * separada de la vía condicional protegida por opId.
+ */
+export function removePendingSyncItemUnconditionally(itemId: string): boolean {
+  try {
+    const currentQueue = getPendingSyncQueue();
+    const filtered = currentQueue.filter(q => q.id !== itemId);
+    return savePendingSyncQueue(filtered);
+  } catch (e) {
+    console.error('Error unconditionally removing pending sync item:', e);
+    return false;
   }
 }
 
 export function removePendingSyncItem(itemId: string): void {
-  try {
-    const currentQueue = getPendingSyncQueue();
-    const filtered = currentQueue.filter(q => q.id !== itemId);
-    savePendingSyncQueue(filtered);
-  } catch (e) {
-    console.error('Error removing pending sync item:', e);
-  }
+  removePendingSyncItemIfMatch(itemId);
 }
 
-export function removePendingMonthFromQueue(userId: string, monthKey: string): void {
-  removePendingSyncItem(`${userId}_month_${monthKey}`);
+export function removePendingMonthFromQueue(userId: string, monthKey: string, expectedOpId?: string | null): boolean {
+  return removePendingSyncItemIfMatch(`${userId}_month_${monthKey}`, expectedOpId);
 }
 
 export function hasPendingSync(userId: string): boolean {
@@ -316,13 +392,15 @@ export function saveBudgetState(
   state: BudgetState, 
   userId?: string | null, 
   isGuest?: boolean
-): void {
+): boolean {
   try {
     const { dataKey } = resolveStorageKeys(userId, isGuest);
-    if (!dataKey) return; // Do not write if identity is unauthenticated / transitional
+    if (!dataKey) return false; // Do not write if identity is unauthenticated / transitional
     localStorage.setItem(dataKey, JSON.stringify(state));
+    return true;
   } catch (error) {
     console.error('Error saving budget state to localStorage', error);
+    return false;
   }
 }
 

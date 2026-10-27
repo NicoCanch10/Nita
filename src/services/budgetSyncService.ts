@@ -25,6 +25,7 @@ import {
   createFreshMonthData,
   getPendingSyncQueue,
   removePendingSyncItem,
+  removePendingSyncItemIfMatch,
   removePendingMonthFromQueue,
   hasPendingSync
 } from '../utils/storage';
@@ -62,12 +63,28 @@ export interface UserMonthDoc {
   updatedAt: string;
 }
 
+export interface MonthConflictInfo {
+  local: MonthData;
+  remote: MonthData;
+  reason: 'orphan_local_divergence' | 'concurrent_modification';
+  detectedAt: string;
+}
+
+export interface FirestoreSyncAdapter {
+  fetchUserDoc?: (userId: string) => Promise<UserProfileDoc | null>;
+  fetchMonths?: (userId: string) => Promise<Record<string, MonthData>>;
+  fetchCategories?: (userId: string) => Promise<CategoryInfo[] | null>;
+  saveUserDoc?: (userId: string, data: any) => Promise<void>;
+  saveCategoriesDoc?: (userId: string, data: any) => Promise<void>;
+}
+
 export interface SyncResult {
   months: Record<string, MonthData>;
   categories: CategoryInfo[];
   currency?: CurrencyCode;
   language?: string;
   source: 'cloud' | 'local_migrated';
+  conflicts?: Record<string, MonthConflictInfo>;
 }
 
 /**
@@ -203,15 +220,87 @@ export function parseCategories(raw: unknown): CategoryInfo[] {
 }
 
 /**
+ * Deep equality comparison for MonthData to detect divergence between local and remote datasets.
+ */
+export function areMonthDataEqual(a: MonthData | null | undefined, b: MonthData | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+
+  if (Number(a.income || 0) !== Number(b.income || 0)) return false;
+  if (Number(a.savingsRate || 0) !== Number(b.savingsRate || 0)) return false;
+  if ((a.extraDaysPosition ?? 'end') !== (b.extraDaysPosition ?? 'end')) return false;
+
+  // Compare categories
+  const aCats = a.categories || [];
+  const bCats = b.categories || [];
+  if (aCats.length !== bCats.length) return false;
+  for (let i = 0; i < aCats.length; i++) {
+    const ac = aCats[i];
+    const bc = bCats.find(c => c.id === ac.id);
+    if (!bc || ac.label !== bc.label || ac.color !== bc.color) return false;
+  }
+
+  // Compare fixed expenses
+  const aFixed = a.fixedExpenses || [];
+  const bFixed = b.fixedExpenses || [];
+  if (aFixed.length !== bFixed.length) return false;
+  for (const af of aFixed) {
+    const bf = bFixed.find(f => f.id === af.id);
+    if (!bf) return false;
+    if (
+      af.name !== bf.name ||
+      Number(af.amount || 0) !== Number(bf.amount || 0) ||
+      af.category !== bf.category ||
+      Boolean(af.isPaid) !== Boolean(bf.isPaid) ||
+      (af.dueDate ?? null) !== (bf.dueDate ?? null) ||
+      (af.notes ?? '') !== (bf.notes ?? '')
+    ) {
+      return false;
+    }
+  }
+
+  // Compare variable expenses
+  const aVar = a.variableExpenses || [];
+  const bVar = b.variableExpenses || [];
+  if (aVar.length !== bVar.length) return false;
+  for (const av of aVar) {
+    const bv = bVar.find(v => v.id === av.id);
+    if (!bv) return false;
+    if (
+      av.date !== bv.date ||
+      av.description !== bv.description ||
+      Number(av.amount || 0) !== Number(bv.amount || 0) ||
+      av.category !== bv.category
+    ) {
+      return false;
+    }
+  }
+
+  // Compare jar adjustments
+  const aAdj = (a.jarAdjustments || {}) as Record<string, number>;
+  const bAdj = (b.jarAdjustments || {}) as Record<string, number>;
+  const aAdjKeys = Object.keys(aAdj);
+  const bAdjKeys = Object.keys(bAdj);
+  if (aAdjKeys.length !== bAdjKeys.length) return false;
+  for (const k of aAdjKeys) {
+    if (Number(aAdj[k] || 0) !== Number(bAdj[k] || 0)) return false;
+  }
+
+  return true;
+}
+
+/**
  * Fetches user data from Cloud Firestore upon login, merging and preserving any non-empty data.
  * Guarantees that when logging into Google across two devices simultaneously:
  * 1. Values already in Firestore or entered by the user are ALWAYS preserved.
  * 2. An empty/fresh device never overwrites the user's existing data with zeros.
  * 3. Both devices initialize with the exact same synchronized dataset.
+ * 4. Orphan local changes (e.g. from failed queue persistence) are protected from silent overwrite.
  */
 export async function fetchAndSyncUserData(
   userId: string,
-  userMeta?: { email?: string | null; displayName?: string | null; photoURL?: string | null }
+  userMeta?: { email?: string | null; displayName?: string | null; photoURL?: string | null },
+  adapter?: FirestoreSyncAdapter
 ): Promise<SyncResult> {
   const nowIso = new Date().toISOString();
   const userDocRef = doc(db, 'users', userId);
@@ -223,7 +312,7 @@ export async function fetchAndSyncUserData(
   const localCategories = loadGlobalCategories(userId, false);
 
   // If the device is currently offline, return this user's isolated local budget state
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return {
       months: localBudgetState.monthsData || {},
       categories: localCategories || [],
@@ -234,50 +323,63 @@ export async function fetchAndSyncUserData(
 
   // 1. Fetch cloud user document
   let remoteUserDoc: UserProfileDoc | null = null;
-  try {
-    const uSnap = await getDoc(userDocRef);
-    if (uSnap.exists()) {
-      remoteUserDoc = uSnap.data() as UserProfileDoc;
+  if (adapter?.fetchUserDoc) {
+    remoteUserDoc = await adapter.fetchUserDoc(userId);
+  } else {
+    try {
+      const uSnap = await getDoc(userDocRef);
+      if (uSnap.exists()) {
+        remoteUserDoc = uSnap.data() as UserProfileDoc;
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `users/${userId}`);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `users/${userId}`);
   }
 
   // 2. Fetch all cloud months
   const remoteMonths: Record<string, MonthData> = {};
-  try {
-    const monthsSnap = await getDocs(monthsColRef);
-    monthsSnap.forEach((dSnap) => {
-      const d = dSnap.data() as UserMonthDoc;
-      if (d && d.monthKey) {
-        remoteMonths[d.monthKey] = {
-          income: Number(d.income) || 0,
-          savingsRate: Number(d.savingsRate) || 0,
-          extraDaysPosition: d.extraDaysPosition ?? 'end',
-          categories: parseCategories(d.categories),
-          fixedExpenses: parseFixedExpenses(d.fixedExpenses),
-          variableExpenses: parseVariableExpenses(d.variableExpenses),
-          jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
-          lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
-        };
-      }
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, `users/${userId}/months`);
+  if (adapter?.fetchMonths) {
+    const fetched = await adapter.fetchMonths(userId);
+    Object.assign(remoteMonths, fetched);
+  } else {
+    try {
+      const monthsSnap = await getDocs(monthsColRef);
+      monthsSnap.forEach((dSnap) => {
+        const d = dSnap.data() as UserMonthDoc;
+        if (d && d.monthKey) {
+          remoteMonths[d.monthKey] = {
+            income: Number(d.income) || 0,
+            savingsRate: Number(d.savingsRate) || 0,
+            extraDaysPosition: d.extraDaysPosition ?? 'end',
+            categories: parseCategories(d.categories),
+            fixedExpenses: parseFixedExpenses(d.fixedExpenses),
+            variableExpenses: parseVariableExpenses(d.variableExpenses),
+            jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
+            lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
+          };
+        }
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, `users/${userId}/months`);
+    }
   }
 
   // 3. Fetch global categories
   let remoteCategories: CategoryInfo[] | null = null;
-  try {
-    const catsSnap = await getDoc(catsDocRef);
-    if (catsSnap.exists()) {
-      const cData = catsSnap.data() as UserCategoriesDoc;
-      if (Array.isArray(cData.categories) && cData.categories.length > 0) {
-        remoteCategories = parseCategories(cData.categories);
+  if (adapter?.fetchCategories) {
+    remoteCategories = await adapter.fetchCategories(userId);
+  } else {
+    try {
+      const catsSnap = await getDoc(catsDocRef);
+      if (catsSnap.exists()) {
+        const cData = catsSnap.data() as UserCategoriesDoc;
+        if (Array.isArray(cData.categories) && cData.categories.length > 0) {
+          remoteCategories = parseCategories(cData.categories);
+        }
       }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `users/${userId}/categories/global`);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `users/${userId}/categories/global`);
   }
 
   const hasRemoteMonths = Object.keys(remoteMonths).length > 0;
@@ -295,11 +397,15 @@ export async function fetchAndSyncUserData(
   if (hasRemoteMonths || remoteUserDoc) {
     // Cloud is authoritative base, but preserve any pending offline edits specifically made by this user
     let finalMonths: Record<string, MonthData> = { ...remoteMonths };
+    const conflicts: Record<string, MonthConflictInfo> = {};
 
     if (localBudgetState.monthsData) {
       for (const [mKey, localData] of Object.entries(localBudgetState.monthsData)) {
-        if (pendingMonthKeys.has(mKey) && localData) {
-          const remoteMonth = remoteMonths[mKey];
+        if (!localData) continue;
+        const remoteMonth = remoteMonths[mKey];
+
+        if (pendingMonthKeys.has(mKey)) {
+          // Caso 1: El mes tiene una operación pendiente registrada en cola -> Conservar protección existente
           if (!remoteMonth) {
             finalMonths[mKey] = localData;
           } else {
@@ -313,6 +419,30 @@ export async function fetchAndSyncUserData(
               fixedExpenses: [...(remoteMonth.fixedExpenses || []), ...pendingFix],
             };
           }
+        } else if (!remoteMonth) {
+          // Caso 2: El mes no existe en Firestore (creado localmente mientras estaba desconectado) -> Preservar localmente
+          finalMonths[mKey] = localData;
+        } else {
+          // Caso 3: No tiene operación pendiente en cola, pero existe tanto local como remoto
+          const isIdentical = areMonthDataEqual(localData, remoteMonth);
+          if (isIdentical) {
+            // Caso 3A: Idénticos -> Sincronización normal
+            finalMonths[mKey] = remoteMonth;
+          } else {
+            // Caso 3B: Difieren sin operación pendiente (cambio huérfano o discrepancia concurrente)
+            // 1. No asumir que los datos locales son obsoletos.
+            // 2. No sobrescribir silenciosamente los datos locales con los remotos.
+            // 3. No sobrescribir automáticamente los datos remotos con los locales.
+            // 4. Preservar ambas versiones señalando conflicto.
+            conflicts[mKey] = {
+              local: localData,
+              remote: remoteMonth,
+              reason: 'orphan_local_divergence',
+              detectedAt: nowIso,
+            };
+            // Se preserva localData en el estado activo del usuario para evitar pérdida de datos en pantalla
+            finalMonths[mKey] = localData;
+          }
         }
       }
     }
@@ -325,30 +455,38 @@ export async function fetchAndSyncUserData(
         : (localCategories && localCategories.length > 0 ? localCategories.map(cleanCategory) : DEFAULT_CATEGORIES.map(c => ({ ...c })));
 
     if (!remoteCategories && finalCategories.length > 0) {
-      try {
-        await setDoc(catsDocRef, cleanForFirestore({
-          userId,
-          categories: finalCategories.map(cleanCategory),
-          updatedAt: nowIso,
-        }));
-      } catch (e) {
-        console.error('Failed to save categories to Google Firestore:', e);
+      if (adapter?.saveCategoriesDoc) {
+        await adapter.saveCategoriesDoc(userId, finalCategories);
+      } else {
+        try {
+          await setDoc(catsDocRef, cleanForFirestore({
+            userId,
+            categories: finalCategories.map(cleanCategory),
+            updatedAt: nowIso,
+          }));
+        } catch (e) {
+          console.error('Failed to save categories to Google Firestore:', e);
+        }
       }
     }
 
     // Ensure user profile document exists in Google Firestore
     if (!remoteUserDoc) {
-      try {
-        await setDoc(userDocRef, cleanForFirestore({
-          uid: userId,
-          email: userMeta?.email || null,
-          displayName: userMeta?.displayName || null,
-          photoURL: userMeta?.photoURL || null,
-          currency: localBudgetState.currency || 'ARS',
-          updatedAt: nowIso,
-        }), { merge: true });
-      } catch (e) {
-        console.error('Failed to create user doc in Google Firestore:', e);
+      if (adapter?.saveUserDoc) {
+        await adapter.saveUserDoc(userId, { uid: userId });
+      } else {
+        try {
+          await setDoc(userDocRef, cleanForFirestore({
+            uid: userId,
+            email: userMeta?.email || null,
+            displayName: userMeta?.displayName || null,
+            photoURL: userMeta?.photoURL || null,
+            currency: localBudgetState.currency || 'ARS',
+            updatedAt: nowIso,
+          }), { merge: true });
+        } catch (e) {
+          console.error('Failed to create user doc in Google Firestore:', e);
+        }
       }
     }
 
@@ -376,6 +514,7 @@ export async function fetchAndSyncUserData(
       currency: remoteUserDoc?.currency || localBudgetState.currency,
       language: remoteUserDoc?.language,
       source: 'cloud',
+      conflicts: Object.keys(conflicts).length > 0 ? conflicts : undefined,
     };
   }
 
@@ -564,6 +703,180 @@ export async function saveUserPreferencesToFirestore(
   }
 }
 
+// In-flight mutex map to serialize writes per monthKey and prevent race conditions
+const inFlightMonthWrites = new Map<string, Promise<void>>();
+
+/**
+ * Saves month document to Firestore serialized by monthKey.
+ * Guarantees that concurrent writes to the same monthKey execute sequentially,
+ * preventing stale promises from overwriting newer updates.
+ */
+export async function saveMonthToFirestoreSerialized(
+  userId: string,
+  monthKey: string,
+  year: number,
+  month: number,
+  data: MonthData
+): Promise<void> {
+  const mutexKey = `${userId}_${monthKey}`;
+  const previousWrite = inFlightMonthWrites.get(mutexKey) || Promise.resolve();
+
+  const currentWrite = previousWrite
+    .catch(() => {}) // never break serialization chain if previous write failed
+    .then(() => saveMonthToFirestore(userId, monthKey, year, month, data));
+
+  inFlightMonthWrites.set(mutexKey, currentWrite);
+
+  try {
+    await currentWrite;
+  } finally {
+    if (inFlightMonthWrites.get(mutexKey) === currentWrite) {
+      inFlightMonthWrites.delete(mutexKey);
+    }
+  }
+}
+
+/**
+ * 3-way reconciliation function for MonthData.
+ * Fuses local changes, remote changes, and common base (if available),
+ * strictly respecting tombstones and non-destructively preserving financial fields.
+ *
+ * POLÍTICA DE RESOLUCIÓN Y ASIMETRÍA DE CONFLICTOS:
+ * 1. Si únicamente un extremo modificó un valor respecto a la base (localChanged XOR remoteChanged),
+ *    la función es simétrica y adopta la modificación correspondiente.
+ * 2. Si ambos extremos modificaron el mismo valor escalar concurrentemente (localChanged AND remoteChanged),
+ *    se aplica una política determinista de "Preferencia de Intención Local" (Local-Intent Preference)
+ *    para no anular las ediciones directas del usuario en este dispositivo. Esta política es
+ *    contextualmente asimétrica cuando se intercambian los roles (local vs remote).
+ * 3. Gastos (fijos y variables): se realiza unión por ID. Si el mismo ID existe en ambos lados con
+ *    atributos modificados, prevalece la versión local. Si un ID está en tombstones, se excluye.
+ *
+ * NOTA DE SEGURIDAD: Esta función es PURA en memoria y NO realiza escrituras a Firestore.
+ */
+export function reconcileMonthData(
+  base: MonthData | null | undefined,
+  local: MonthData,
+  remote: MonthData,
+  tombstones?: Set<string> | Map<string, number>
+): MonthData {
+  const tombstoneMap = tombstones instanceof Map 
+    ? tombstones 
+    : tombstones instanceof Set 
+      ? new Map(Array.from(tombstones).map(id => [id, Date.now()])) 
+      : new Map<string, number>();
+
+  // 1. Income: resolución 3-way determinista
+  let income = remote.income;
+  if (base) {
+    const localChanged = local.income !== base.income;
+    const remoteChanged = remote.income !== base.income;
+    if (localChanged && !remoteChanged) {
+      income = local.income;
+    } else if (!localChanged && remoteChanged) {
+      income = remote.income;
+    } else if (localChanged && remoteChanged) {
+      // Conflicto concurrente directo: prevalece local por política de intención
+      income = local.income;
+    } else {
+      income = base.income;
+    }
+  } else {
+    income = local.income !== 0 ? local.income : remote.income;
+  }
+
+  // 2. Savings rate: resolución 3-way determinista
+  let savingsRate = remote.savingsRate;
+  if (base) {
+    const localChanged = (local.savingsRate ?? 0) !== (base.savingsRate ?? 0);
+    const remoteChanged = (remote.savingsRate ?? 0) !== (base.savingsRate ?? 0);
+    if (localChanged && !remoteChanged) {
+      savingsRate = local.savingsRate;
+    } else if (!localChanged && remoteChanged) {
+      savingsRate = remote.savingsRate;
+    } else if (localChanged && remoteChanged) {
+      savingsRate = local.savingsRate;
+    } else {
+      savingsRate = base.savingsRate ?? 0;
+    }
+  } else {
+    savingsRate = (local.savingsRate ?? 0) > 0 ? local.savingsRate : remote.savingsRate;
+  }
+
+  // 3. Extra days position: resolución 3-way determinista
+  let extraDaysPosition = remote.extraDaysPosition;
+  if (base) {
+    const localChanged = local.extraDaysPosition !== base.extraDaysPosition;
+    const remoteChanged = remote.extraDaysPosition !== base.extraDaysPosition;
+    if (localChanged && !remoteChanged) {
+      extraDaysPosition = local.extraDaysPosition;
+    } else if (!localChanged && remoteChanged) {
+      extraDaysPosition = remote.extraDaysPosition;
+    } else if (localChanged && remoteChanged) {
+      extraDaysPosition = local.extraDaysPosition;
+    } else {
+      extraDaysPosition = base.extraDaysPosition;
+    }
+  }
+
+  // 4. Categories: union by id, preserving custom badges and labels
+  const categoryMap = new Map<string, CategoryInfo>();
+  (remote.categories || []).forEach(c => categoryMap.set(c.id, { ...c }));
+  (local.categories || []).forEach(c => {
+    const existing = categoryMap.get(c.id);
+    if (!existing) {
+      categoryMap.set(c.id, { ...c });
+    } else {
+      categoryMap.set(c.id, { ...existing, ...c });
+    }
+  });
+
+  // 5. Fixed Expenses: union by id, excluding active tombstones
+  const fixedMap = new Map<string, FixedExpense>();
+  (remote.fixedExpenses || []).forEach(f => {
+    if (!tombstoneMap.has(f.id)) {
+      fixedMap.set(f.id, { ...f });
+    }
+  });
+  (local.fixedExpenses || []).forEach(f => {
+    if (!tombstoneMap.has(f.id)) {
+      fixedMap.set(f.id, { ...f });
+    }
+  });
+
+  // 6. Variable Expenses: union by id, excluding active tombstones
+  const variableMap = new Map<string, VariableExpense>();
+  (remote.variableExpenses || []).forEach(v => {
+    if (!tombstoneMap.has(v.id)) {
+      variableMap.set(v.id, { ...v });
+    }
+  });
+  (local.variableExpenses || []).forEach(v => {
+    if (!tombstoneMap.has(v.id)) {
+      variableMap.set(v.id, { ...v });
+    }
+  });
+
+  // 7. Jar Adjustments: merge map entries
+  const jarAdjustments = {
+    ...(remote.jarAdjustments || {}),
+    ...(local.jarAdjustments || {}),
+  };
+
+  // 8. Last Jar Adjustment Log: prefer local if present, else remote
+  const lastJarAdjustmentLog = local.lastJarAdjustmentLog ?? remote.lastJarAdjustmentLog;
+
+  return {
+    income,
+    savingsRate,
+    extraDaysPosition: extraDaysPosition === 'start' ? 'start' : 'end',
+    categories: Array.from(categoryMap.values()),
+    fixedExpenses: Array.from(fixedMap.values()),
+    variableExpenses: Array.from(variableMap.values()),
+    jarAdjustments: Object.keys(jarAdjustments).length > 0 ? jarAdjustments : undefined,
+    lastJarAdjustmentLog: lastJarAdjustmentLog ?? undefined,
+  };
+}
+
 /**
  * Processes and flushes all pending offline sync items to Google Firestore.
  * Automatically runs when internet connectivity is re-established, on window focus,
@@ -572,7 +885,7 @@ export async function saveUserPreferencesToFirestore(
 export async function processPendingSyncQueue(
   userId: string
 ): Promise<{ syncedCount: number; remainingCount: number }> {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     const q = getPendingSyncQueue(userId);
     return { syncedCount: 0, remainingCount: q.length };
   }
@@ -585,18 +898,31 @@ export async function processPendingSyncQueue(
   let synced = 0;
   for (const item of queue) {
     try {
-      if (item.type === 'month' && item.monthKey && item.data && typeof item.year === 'number' && typeof item.month === 'number') {
-        await saveMonthToFirestore(item.userId, item.monthKey, item.year, item.month, item.data);
-        removePendingSyncItem(item.id);
-        synced++;
-      } else if (item.type === 'categories' && item.categories) {
-        await saveGlobalCategoriesToFirestore(item.userId, item.categories);
-        removePendingSyncItem(item.id);
-        synced++;
-      } else if (item.type === 'preferences' && item.preferences) {
-        await saveUserPreferencesToFirestore(item.userId, item.preferences);
-        removePendingSyncItem(item.id);
-        synced++;
+      // Re-verify that item is still in the pending queue (not removed or updated by subsequent user action)
+      const currentQueue = getPendingSyncQueue(userId);
+      const currentItem = currentQueue.find(q => q.id === item.id);
+      if (!currentItem) continue;
+
+      const itemOpId = currentItem.opId;
+
+      if (currentItem.type === 'month' && currentItem.monthKey && currentItem.data && typeof currentItem.year === 'number' && typeof currentItem.month === 'number') {
+        await saveMonthToFirestoreSerialized(currentItem.userId, currentItem.monthKey, currentItem.year, currentItem.month, currentItem.data);
+        const removed = removePendingSyncItemIfMatch(currentItem.id, itemOpId);
+        if (removed) {
+          synced++;
+        }
+      } else if (currentItem.type === 'categories' && currentItem.categories) {
+        await saveGlobalCategoriesToFirestore(currentItem.userId, currentItem.categories);
+        const removed = removePendingSyncItemIfMatch(currentItem.id, itemOpId);
+        if (removed) {
+          synced++;
+        }
+      } else if (currentItem.type === 'preferences' && currentItem.preferences) {
+        await saveUserPreferencesToFirestore(currentItem.userId, currentItem.preferences);
+        const removed = removePendingSyncItemIfMatch(currentItem.id, itemOpId);
+        if (removed) {
+          synced++;
+        }
       }
     } catch (err) {
       console.warn(`[SyncQueue] Interrupted while uploading pending item ${item.id}:`, err);

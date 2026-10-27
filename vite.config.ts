@@ -52,7 +52,7 @@ export default defineConfig(() => {
       versionManifestPlugin(BUILD_ID, BUILD_TIME),
       VitePWA({
         registerType: 'autoUpdate',
-        injectRegister: null,
+        injectRegister: 'auto',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'nita-logo.jpg', 'icon.svg'],
         manifest: {
           id: '/',
@@ -90,12 +90,44 @@ export default defineConfig(() => {
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
+          navigateFallback: '/index.html',
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           globIgnores: ['**/version.json'],
+          runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'google-fonts-cache',
+                expiration: {
+                  maxEntries: 10,
+                  maxAgeSeconds: 60 * 60 * 24 * 365,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'gstatic-fonts-cache',
+                expiration: {
+                  maxEntries: 10,
+                  maxAgeSeconds: 60 * 60 * 24 * 365,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+          ],
         },
         devOptions: {
-          enabled: false,
+          enabled: true,
+          type: 'module',
         },
       }),
     ],
