@@ -30,6 +30,8 @@ interface NotificationCenterProps {
   onTogglePaid: (expenseId: string) => void;
   alertSettings?: DueDateAlertSettings;
   language?: string;
+  year?: number;
+  month?: number;
 }
 
 export const NotificationCenter: React.FC<NotificationCenterProps> = ({
@@ -40,6 +42,8 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   onTogglePaid,
   alertSettings = DEFAULT_ALERT_SETTINGS,
   language = 'es',
+  year,
+  month,
 }) => {
   const t = getTranslations(language);
   const [isOpen, setIsOpen] = useState(false);
@@ -48,7 +52,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   );
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const notifications = getExpenseNotifications(expenses, currentDay, alertSettings, language);
+  const notifications = getExpenseNotifications(expenses, currentDay, alertSettings, language, year, month);
   const criticalCount = notifications.filter(n => n.type === 'today' || n.type === 'in_3_days' || n.type === 'upcoming').length;
   const totalAlerts = notifications.length;
 

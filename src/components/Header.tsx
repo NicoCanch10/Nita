@@ -282,6 +282,8 @@ export const Header: React.FC<HeaderProps> = ({
               onTogglePaid={onTogglePaid}
               alertSettings={alertSettings}
               language={language}
+              year={year}
+              month={month}
             />
 
             {/* Settings Gear Button (Rueda de configuraciones con Modo Oscuro/Blanco, App, Actualizaciones, Avisos de vencimientos, etc.) */}

@@ -110,22 +110,41 @@ export function getExpenseNotifications(
   expenses: FixedExpense[],
   referenceDay?: number | null,
   settings: DueDateAlertSettings = DEFAULT_ALERT_SETTINGS,
-  language: string = 'es'
+  language: string = 'es',
+  year?: number,
+  month?: number,
+  referenceDate?: Date
 ): ExpenseNotification[] {
   if (!settings.enabled) {
     return [];
   }
 
-  const today = new Date();
-  const currentDay = referenceDay ?? today.getDate();
-  const daysInAdvance = Math.min(30, Math.max(1, settings.daysInAdvance));
+  const now = referenceDate ?? new Date();
+  const currentRealYear = now.getFullYear();
+  const currentRealMonth = now.getMonth();
+  const currentRealDay = referenceDay !== null && referenceDay !== undefined ? referenceDay : now.getDate();
+  const todayZero = new Date(currentRealYear, currentRealMonth, currentRealDay, 0, 0, 0, 0);
 
+  const daysInAdvance = Math.min(30, Math.max(1, settings.daysInAdvance));
   const notifications: ExpenseNotification[] = [];
+
+  // Determine the target year and month for these expenses
+  const expenseYear = year !== undefined && year !== null ? year : currentRealYear;
+  const expenseMonth = month !== undefined && month !== null ? month : currentRealMonth;
 
   expenses.forEach((expense) => {
     if (expense.isPaid || !expense.dueDate) return;
 
-    const diff = expense.dueDate - currentDay;
+    // Sanitize due date against actual days count in the target month (e.g. Feb 28 vs 31)
+    const maxDaysInTargetMonth = new Date(expenseYear, expenseMonth + 1, 0).getDate();
+    const sanitizedDueDay = Math.min(maxDaysInTargetMonth, Math.max(1, Math.round(expense.dueDate)));
+
+    // Target due date in the specific month and year of the expense
+    const targetDueDate = new Date(expenseYear, expenseMonth, sanitizedDueDay, 0, 0, 0, 0);
+
+    // Difference in calendar days between today's date and the expense's due date
+    const diffTime = targetDueDate.getTime() - todayZero.getTime();
+    const diff = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
     if (diff === 0) {
       notifications.push({

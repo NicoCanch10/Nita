@@ -36,8 +36,8 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
   const [isDismissedSession, setIsDismissedSession] = useState(false);
 
   const now = new Date();
-  const activeYear = year ?? now.getFullYear();
-  const activeMonth = month ?? (now.getMonth() + 1);
+  const activeYear = year !== undefined && year !== null ? year : now.getFullYear();
+  const activeMonth = month !== undefined && month !== null ? month : now.getMonth();
   const activeDay = currentDay ?? now.getDate();
 
   // If user disabled alerts in settings or dismissed in current session
@@ -45,7 +45,7 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
     return null;
   }
 
-  const allNotifications = getExpenseNotifications(expenses, activeDay, alertSettings, language);
+  const allNotifications = getExpenseNotifications(expenses, currentDay, alertSettings, language, activeYear, activeMonth);
   
   // Critical notifications to alert for in banner:
   // - n.type === 'today': Due today (always shown, NOT filtered by preventive dismissal because due date has arrived)
