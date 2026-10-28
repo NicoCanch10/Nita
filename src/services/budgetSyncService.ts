@@ -70,6 +70,66 @@ export interface MonthConflictInfo {
   detectedAt: string;
 }
 
+export const USER_CONFLICTS_STORAGE_KEY_PREFIX = 'nita_user_conflicts_';
+
+export function getUserConflictsKey(userId: string): string {
+  return `${USER_CONFLICTS_STORAGE_KEY_PREFIX}${userId}`;
+}
+
+/**
+ * Loads persisted unresolved month conflicts from localStorage for this user.
+ * Preserves durability across app reloads, tab closures, and offline sessions.
+ */
+export function getPendingConflicts(userId?: string | null): Record<string, MonthConflictInfo> {
+  if (!userId) return {};
+  try {
+    const raw = localStorage.getItem(getUserConflictsKey(userId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, MonthConflictInfo>;
+    }
+    return {};
+  } catch (e) {
+    console.error('Error loading pending conflicts from localStorage:', e);
+    return {};
+  }
+}
+
+/**
+ * Persists active unresolved month conflicts to localStorage for this user.
+ * If empty, cleanly removes the storage key.
+ */
+export function savePendingConflicts(userId: string, conflicts: Record<string, MonthConflictInfo>): boolean {
+  try {
+    const key = getUserConflictsKey(userId);
+    if (!conflicts || Object.keys(conflicts).length === 0) {
+      localStorage.removeItem(key);
+      return true;
+    }
+    localStorage.setItem(key, JSON.stringify(conflicts));
+    return true;
+  } catch (e) {
+    console.error('Error saving pending conflicts to localStorage:', e);
+    return false;
+  }
+}
+
+/**
+ * Clears an individual resolved month conflict for a user.
+ */
+export function clearPendingConflict(userId: string, monthKey: string): boolean {
+  try {
+    const current = getPendingConflicts(userId);
+    if (!current[monthKey]) return true;
+    delete current[monthKey];
+    return savePendingConflicts(userId, current);
+  } catch (e) {
+    console.error('Error clearing pending conflict:', e);
+    return false;
+  }
+}
+
 export interface FirestoreSyncAdapter {
   fetchUserDoc?: (userId: string) => Promise<UserProfileDoc | null>;
   fetchMonths?: (userId: string) => Promise<Record<string, MonthData>>;
@@ -85,6 +145,7 @@ export interface SyncResult {
   language?: string;
   source: 'cloud' | 'local_migrated';
   conflicts?: Record<string, MonthConflictInfo>;
+  storageFailed?: boolean;
 }
 
 /**
@@ -221,6 +282,8 @@ export function parseCategories(raw: unknown): CategoryInfo[] {
 
 /**
  * Deep equality comparison for MonthData to detect divergence between local and remote datasets.
+ * Compares all financial fields, categories, category metadata, fixed/variable expenses,
+ * jar adjustments, and jar adjustment logs.
  */
 export function areMonthDataEqual(a: MonthData | null | undefined, b: MonthData | null | undefined): boolean {
   if (a === b) return true;
@@ -230,14 +293,23 @@ export function areMonthDataEqual(a: MonthData | null | undefined, b: MonthData 
   if (Number(a.savingsRate || 0) !== Number(b.savingsRate || 0)) return false;
   if ((a.extraDaysPosition ?? 'end') !== (b.extraDaysPosition ?? 'end')) return false;
 
-  // Compare categories
+  // Compare categories including optional metadata (badgeBg, badgeText, isCustom)
   const aCats = a.categories || [];
   const bCats = b.categories || [];
   if (aCats.length !== bCats.length) return false;
   for (let i = 0; i < aCats.length; i++) {
     const ac = aCats[i];
     const bc = bCats.find(c => c.id === ac.id);
-    if (!bc || ac.label !== bc.label || ac.color !== bc.color) return false;
+    if (
+      !bc ||
+      ac.label !== bc.label ||
+      ac.color !== bc.color ||
+      Boolean(ac.isCustom) !== Boolean(bc.isCustom) ||
+      (ac.badgeBg ?? '') !== (bc.badgeBg ?? '') ||
+      (ac.badgeText ?? '') !== (bc.badgeText ?? '')
+    ) {
+      return false;
+    }
   }
 
   // Compare fixed expenses
@@ -286,7 +358,130 @@ export function areMonthDataEqual(a: MonthData | null | undefined, b: MonthData 
     if (Number(aAdj[k] || 0) !== Number(bAdj[k] || 0)) return false;
   }
 
+  // Compare lastJarAdjustmentLog including all optional fields
+  const aLog = a.lastJarAdjustmentLog;
+  const bLog = b.lastJarAdjustmentLog;
+  if (Boolean(aLog) !== Boolean(bLog)) return false;
+  if (aLog && bLog) {
+    if (
+      aLog.date !== bLog.date ||
+      aLog.exceededJarTitle !== bLog.exceededJarTitle ||
+      Number(aLog.diff || 0) !== Number(bLog.diff || 0) ||
+      Boolean(aLog.transferredToNextMonth) !== Boolean(bLog.transferredToNextMonth) ||
+      (aLog.nextMonthKey ?? '') !== (bLog.nextMonthKey ?? '')
+    ) {
+      return false;
+    }
+  }
+
   return true;
+}
+
+/**
+ * Processes incoming real-time remote months, protecting any months with unresolved conflicts.
+ * Requisito 2: Proteger el mes en subscribeToUserMonths.
+ * - Comprobar si el mes afectado tiene un conflicto huérfano sin resolver.
+ * - Si existe: NO reemplazar el mes local protegido con el remoto, NO persistir una versión
+ *   que descarte cambios locales y mantener actualizado el remote en el descriptor.
+ * - Los meses sin conflictos continúan sincronizándose normalmente.
+ */
+export function processRemoteMonthsSnapshot(
+  remoteMonths: Record<string, MonthData>,
+  prevMonths: Record<string, MonthData>,
+  activeConflicts: Record<string, MonthConflictInfo>,
+  pendingExpenseIds: Set<string>,
+  pendingFixedIds: Set<string>,
+  deletedExpenseIds: Map<string, number>,
+  deletedFixedIds: Map<string, number>
+): {
+  updatedMonths: Record<string, MonthData>;
+  updatedConflicts: Record<string, MonthConflictInfo>;
+  conflictCount: number;
+} {
+  const updatedMonths: Record<string, MonthData> = { ...prevMonths };
+  const updatedConflicts: Record<string, MonthConflictInfo> = { ...activeConflicts };
+  const now = Date.now();
+
+  for (const [mKey, remoteData] of Object.entries(remoteMonths)) {
+    // Si este mes tiene un conflicto huérfano pendiente:
+    if (updatedConflicts[mKey]) {
+      // 1. Conservar intacto el mes local protegido
+      updatedMonths[mKey] = prevMonths[mKey] || remoteData;
+      // 2. Mantener la versión remota actualizada en el descriptor para permitir resolución informada
+      if (updatedConflicts[mKey].remote !== remoteData) {
+        updatedConflicts[mKey] = {
+          ...updatedConflicts[mKey],
+          remote: remoteData,
+        };
+      }
+      continue;
+    }
+
+    const localData = prevMonths[mKey];
+    if (!localData) {
+      updatedMonths[mKey] = remoteData;
+      continue;
+    }
+
+    // 1. Filter remote fixed expenses against active deletion tombstones (15-second grace period)
+    const cleanRemoteFixed = (remoteData.fixedExpenses || []).filter(e => {
+      const deletedAt = deletedFixedIds.get(e.id);
+      if (!deletedAt) return true;
+      if (now - deletedAt < 15000) return false;
+      deletedFixedIds.delete(e.id);
+      return true;
+    });
+
+    // 2. Filter remote variable expenses against active deletion tombstones
+    const cleanRemoteVar = (remoteData.variableExpenses || []).filter(e => {
+      const deletedAt = deletedExpenseIds.get(e.id);
+      if (!deletedAt) return true;
+      if (now - deletedAt < 15000) return false;
+      deletedExpenseIds.delete(e.id);
+      return true;
+    });
+
+    // 3. Clear tombstones for items that remote data has confirmed are gone
+    const remoteFixedIdSet = new Set((remoteData.fixedExpenses || []).map(e => e.id));
+    deletedFixedIds.forEach((_, id) => {
+      if (!remoteFixedIdSet.has(id)) {
+        deletedFixedIds.delete(id);
+      }
+    });
+
+    const remoteVarIdSet = new Set((remoteData.variableExpenses || []).map(e => e.id));
+    deletedExpenseIds.forEach((_, id) => {
+      if (!remoteVarIdSet.has(id)) {
+        deletedExpenseIds.delete(id);
+      }
+    });
+
+    // 4. Preserve any fixed expenses that were added locally and are still pending remote confirmation
+    const cleanRemoteFixIds = new Set(cleanRemoteFixed.map(e => e.id));
+    const pendingFixExpenses = (localData.fixedExpenses || []).filter(
+      e => pendingFixedIds.has(e.id) && !cleanRemoteFixIds.has(e.id) && !deletedFixedIds.has(e.id)
+    );
+    cleanRemoteFixed.forEach(e => pendingFixedIds.delete(e.id));
+
+    // 5. Preserve any variable expenses that were added locally and are still pending remote confirmation
+    const cleanRemoteVarIds = new Set(cleanRemoteVar.map(e => e.id));
+    const pendingVarExpenses = (localData.variableExpenses || []).filter(
+      e => pendingExpenseIds.has(e.id) && !cleanRemoteVarIds.has(e.id) && !deletedExpenseIds.has(e.id)
+    );
+    cleanRemoteVar.forEach(e => pendingExpenseIds.delete(e.id));
+
+    updatedMonths[mKey] = {
+      ...remoteData,
+      variableExpenses: [...cleanRemoteVar, ...pendingVarExpenses],
+      fixedExpenses: [...cleanRemoteFixed, ...pendingFixExpenses],
+    };
+  }
+
+  return {
+    updatedMonths,
+    updatedConflicts,
+    conflictCount: Object.keys(updatedConflicts).length,
+  };
 }
 
 /**
@@ -311,13 +506,15 @@ export async function fetchAndSyncUserData(
   const localBudgetState = loadBudgetState(userId, false);
   const localCategories = loadGlobalCategories(userId, false);
 
-  // If the device is currently offline, return this user's isolated local budget state
+  // If the device is currently offline, return this user's isolated local budget state and any persisted conflicts
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    const storedConflicts = getPendingConflicts(userId);
     return {
       months: localBudgetState.monthsData || {},
       categories: localCategories || [],
       currency: localBudgetState.currency,
       source: 'cloud',
+      conflicts: Object.keys(storedConflicts).length > 0 ? storedConflicts : undefined,
     };
   }
 
@@ -397,7 +594,8 @@ export async function fetchAndSyncUserData(
   if (hasRemoteMonths || remoteUserDoc) {
     // Cloud is authoritative base, but preserve any pending offline edits specifically made by this user
     let finalMonths: Record<string, MonthData> = { ...remoteMonths };
-    const conflicts: Record<string, MonthConflictInfo> = {};
+    const storedConflicts = getPendingConflicts(userId);
+    const conflicts: Record<string, MonthConflictInfo> = { ...storedConflicts };
 
     if (localBudgetState.monthsData) {
       for (const [mKey, localData] of Object.entries(localBudgetState.monthsData)) {
@@ -406,6 +604,7 @@ export async function fetchAndSyncUserData(
 
         if (pendingMonthKeys.has(mKey)) {
           // Caso 1: El mes tiene una operación pendiente registrada en cola -> Conservar protección existente
+          // H-9: No eliminar prematuramente de conflicts hasta confirmar convergencia idéntica
           if (!remoteMonth) {
             finalMonths[mKey] = localData;
           } else {
@@ -426,7 +625,8 @@ export async function fetchAndSyncUserData(
           // Caso 3: No tiene operación pendiente en cola, pero existe tanto local como remoto
           const isIdentical = areMonthDataEqual(localData, remoteMonth);
           if (isIdentical) {
-            // Caso 3A: Idénticos -> Sincronización normal
+            // Caso 3A: Idénticos -> Sincronización normal y remoción de conflicto previo si existía
+            delete conflicts[mKey];
             finalMonths[mKey] = remoteMonth;
           } else {
             // Caso 3B: Difieren sin operación pendiente (cambio huérfano o discrepancia concurrente)
@@ -438,7 +638,7 @@ export async function fetchAndSyncUserData(
               local: localData,
               remote: remoteMonth,
               reason: 'orphan_local_divergence',
-              detectedAt: nowIso,
+              detectedAt: storedConflicts[mKey]?.detectedAt || nowIso,
             };
             // Se preserva localData en el estado activo del usuario para evitar pérdida de datos en pantalla
             finalMonths[mKey] = localData;
@@ -491,13 +691,22 @@ export async function fetchAndSyncUserData(
     }
 
     // Save strictly to this user's isolated local cache
-    saveBudgetState({
+    const budgetSaved = saveBudgetState({
       month: localBudgetState.month,
       year: localBudgetState.year,
       currency: remoteUserDoc?.currency || localBudgetState.currency || 'ARS',
       monthsData: finalMonths,
     }, userId, false);
+    if (!budgetSaved) {
+      console.warn(`[Sync] Advertencia: Fallo al persistir presupuesto en localStorage`);
+    }
     saveGlobalCategories(finalCategories, userId, false);
+
+    // Requisito 3 & H-11: Persistir descriptor de conflictos de manera durable y verificar resultado
+    const conflictsSaved = savePendingConflicts(userId, conflicts);
+    if (!conflictsSaved && Object.keys(conflicts).length > 0) {
+      console.warn(`[Sync] Advertencia: Fallo al persistir ${Object.keys(conflicts).length} conflictos en localStorage`);
+    }
 
     // If there were pending offline items for this user, flush queue in background
     if (pendingItems.length > 0) {
@@ -515,6 +724,7 @@ export async function fetchAndSyncUserData(
       language: remoteUserDoc?.language,
       source: 'cloud',
       conflicts: Object.keys(conflicts).length > 0 ? conflicts : undefined,
+      storageFailed: !budgetSaved || (!conflictsSaved && Object.keys(conflicts).length > 0),
     };
   }
 
@@ -575,19 +785,21 @@ export async function fetchAndSyncUserData(
   }
 
   // Save isolated local cache for this new user starting at 0
-  saveBudgetState({
+  const budgetSaved = saveBudgetState({
     month: currentOngoingMonth,
     year: currentOngoingYear,
     currency: 'ARS',
     monthsData: finalMonths,
   }, userId, false);
   saveGlobalCategories(finalCategories, userId, false);
+  const conflictsSaved = savePendingConflicts(userId, {});
 
   return {
     months: finalMonths,
     categories: finalCategories,
     currency: 'ARS',
     source: 'cloud',
+    storageFailed: !budgetSaved || !conflictsSaved,
   };
 }
 

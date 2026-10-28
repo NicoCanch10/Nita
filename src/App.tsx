@@ -59,7 +59,11 @@ import {
   subscribeToUserMonths,
   subscribeToGlobalCategories,
   subscribeToUserProfile,
-  processPendingSyncQueue
+  processPendingSyncQueue,
+  getPendingConflicts,
+  savePendingConflicts,
+  processRemoteMonthsSnapshot,
+  MonthConflictInfo
 } from './services/budgetSyncService';
 import { 
   LayoutDashboard, 
@@ -82,6 +86,11 @@ function MainApp() {
   const pendingFixedIdsRef = useRef<Set<string>>(new Set());
   const deletedFixedIdsRef = useRef<Map<string, number>>(new Map());
   const deletedExpenseIdsRef = useRef<Map<string, number>>(new Map());
+  const unresolvedConflictsRef = useRef<Record<string, MonthConflictInfo>>({});
+
+  useEffect(() => {
+    unresolvedConflictsRef.current = user ? getPendingConflicts(user.uid) : {};
+  }, [user?.uid]);
 
   // Theme state: light or dark mode
   const { theme, toggleTheme } = useTheme();
@@ -219,7 +228,9 @@ function MainApp() {
           saveSelectedLanguage(syncResult.language);
         }
         setIsCloudSyncReady(true);
-        if (syncResult.conflicts && Object.keys(syncResult.conflicts).length > 0) {
+        const activeConflicts = syncResult.conflicts || {};
+        unresolvedConflictsRef.current = activeConflicts;
+        if (Object.keys(activeConflicts).length > 0 || syncResult.storageFailed) {
           setSyncStatus('error');
         } else {
           setSyncStatus('synced');
@@ -274,19 +285,19 @@ function MainApp() {
         if (hasPendingSync(user.uid)) {
           setSyncStatus('syncing');
           const res = await processPendingSyncQueue(user.uid);
+          const hasConflicts = Object.keys(unresolvedConflictsRef.current).length > 0;
           if (res.remainingCount === 0) {
-            setSyncStatus('synced');
+            setSyncStatus(hasConflicts ? 'error' : 'synced');
           } else {
             // Aún quedan elementos sin subir porque Google falló -> estado de error para reintentar
             setSyncStatus(navigator.onLine ? 'error' : 'offline');
           }
-        } else if (syncStatusRef.current === 'error') {
-          // Si el estado previo fue error, aseguramos la persistencia del mes activo
-          const currentData = monthsDataRef.current[currentKeyRef.current];
-          if (currentData) {
-            setSyncStatus('syncing');
-            await saveMonthToFirestoreSerialized(user.uid, currentKeyRef.current, yearRef.current, monthRef.current, currentData);
-            setSyncStatus('synced');
+        } else {
+          // Si no hay elementos pendientes en cola, NO escribimos datos a ciegas en Firestore.
+          // Si persisten conflictos huérfanos sin resolver, se preserva el estado 'error' y jamás 'synced'.
+          const hasConflicts = Object.keys(unresolvedConflictsRef.current).length > 0;
+          if (hasConflicts) {
+            setSyncStatus('error');
           }
         }
       } catch (err) {
@@ -324,7 +335,8 @@ function MainApp() {
 
   // Real-time Firestore subscriptions across devices (Simultaneous viewing and instant live reflection)
   useEffect(() => {
-    if (!user || !isOnline || isOfflineSession || !isFirebaseAuthActive) return;
+    // H-8: No activar suscripciones en tiempo real hasta que la sincronización inicial termine
+    if (!user || !isOnline || isOfflineSession || !isFirebaseAuthActive || !isCloudSyncReady) return;
 
     // 1. Months collection real-time subscription
     const unsubMonths = subscribeToUserMonths(user.uid, (remoteMonths, hasPendingWrites) => {
@@ -335,81 +347,45 @@ function MainApp() {
 
       if (remoteMonths && Object.keys(remoteMonths).length > 0) {
         isRemoteSyncRef.current = true;
-        setMonthsData(prev => {
-          const updated: Record<string, MonthData> = { ...prev };
-          const now = Date.now();
 
-          for (const [mKey, remoteData] of Object.entries(remoteMonths)) {
-            const localData = prev[mKey];
-            if (!localData) {
-              updated[mKey] = remoteData;
-              continue;
-            }
+        // H-10: Ejecutar cálculo y persistencia fuera del updater funcional diferido de React
+        const currentMonths = latestMonthsDataRef.current;
+        const { updatedMonths, updatedConflicts, conflictCount } = processRemoteMonthsSnapshot(
+          remoteMonths,
+          currentMonths,
+          unresolvedConflictsRef.current,
+          pendingExpenseIdsRef.current,
+          pendingFixedIdsRef.current,
+          deletedExpenseIdsRef.current,
+          deletedFixedIdsRef.current
+        );
 
-            // 1. Filter remote fixed expenses against active deletion tombstones (15-second grace period)
-            const cleanRemoteFixed = (remoteData.fixedExpenses || []).filter(e => {
-              const deletedAt = deletedFixedIdsRef.current.get(e.id);
-              if (!deletedAt) return true;
-              if (now - deletedAt < 15000) return false;
-              deletedFixedIdsRef.current.delete(e.id);
-              return true;
-            });
+        unresolvedConflictsRef.current = updatedConflicts;
+        latestMonthsDataRef.current = updatedMonths;
+        setMonthsData(updatedMonths);
 
-            // 2. Filter remote variable expenses against active deletion tombstones
-            const cleanRemoteVar = (remoteData.variableExpenses || []).filter(e => {
-              const deletedAt = deletedExpenseIdsRef.current.get(e.id);
-              if (!deletedAt) return true;
-              if (now - deletedAt < 15000) return false;
-              deletedExpenseIdsRef.current.delete(e.id);
-              return true;
-            });
+        // H-11: Verificar resultado del guardado del descriptor de conflictos
+        const conflictsSaved = user?.uid ? savePendingConflicts(user.uid, updatedConflicts) : true;
+        if (!conflictsSaved) {
+          console.warn('Fallo al persistir descriptor de conflictos en localStorage');
+        }
 
-            // 3. Clear tombstones for items that remote data has confirmed are gone
-            const remoteFixedIdSet = new Set((remoteData.fixedExpenses || []).map(e => e.id));
-            deletedFixedIdsRef.current.forEach((_, id) => {
-              if (!remoteFixedIdSet.has(id)) {
-                deletedFixedIdsRef.current.delete(id);
-              }
-            });
+        // Save backup locally isolated to this user (preserving local protected data in conflict)
+        const budgetSaved = user?.uid ? saveBudgetState({
+          month: monthRef.current,
+          year: yearRef.current,
+          currency: currencyRef.current,
+          monthsData: updatedMonths,
+        }, user.uid, false) : true;
+        if (!budgetSaved) {
+          console.warn('Fallo al persistir estado de presupuesto en localStorage tras snapshot remoto');
+        }
 
-            const remoteVarIdSet = new Set((remoteData.variableExpenses || []).map(e => e.id));
-            deletedExpenseIdsRef.current.forEach((_, id) => {
-              if (!remoteVarIdSet.has(id)) {
-                deletedExpenseIdsRef.current.delete(id);
-              }
-            });
-
-            // 4. Preserve any fixed expenses that were added locally and are still pending remote confirmation
-            const cleanRemoteFixIds = new Set(cleanRemoteFixed.map(e => e.id));
-            const pendingFixExpenses = (localData.fixedExpenses || []).filter(
-              e => pendingFixedIdsRef.current.has(e.id) && !cleanRemoteFixIds.has(e.id) && !deletedFixedIdsRef.current.has(e.id)
-            );
-            cleanRemoteFixed.forEach(e => pendingFixedIdsRef.current.delete(e.id));
-
-            // 5. Preserve any variable expenses that were added locally and are still pending remote confirmation
-            const cleanRemoteVarIds = new Set(cleanRemoteVar.map(e => e.id));
-            const pendingVarExpenses = (localData.variableExpenses || []).filter(
-              e => pendingExpenseIdsRef.current.has(e.id) && !cleanRemoteVarIds.has(e.id) && !deletedExpenseIdsRef.current.has(e.id)
-            );
-            cleanRemoteVar.forEach(e => pendingExpenseIdsRef.current.delete(e.id));
-
-            updated[mKey] = {
-              ...remoteData,
-              variableExpenses: [...cleanRemoteVar, ...pendingVarExpenses],
-              fixedExpenses: [...cleanRemoteFixed, ...pendingFixExpenses],
-            };
-          }
-
-          // Save backup locally isolated to this user
-          saveBudgetState({
-            month,
-            year,
-            currency,
-            monthsData: updated,
-          }, user.uid, false);
-          return updated;
-        });
-        setSyncStatus('synced');
+        // H-10, H-11 & R-1: Evaluación síncrona fiable del estado sin desfasaje de referencias
+        // Si hay conflictos pendientes, si falló guardar conflictos, O si falló guardar el presupuesto local,
+        // el sistema NUNCA debe marcarse como 'synced', sino degradar a 'error'.
+        const hasConflictsOrStorageFailure = conflictCount > 0 || !conflictsSaved || !budgetSaved;
+        setSyncStatus(hasConflictsOrStorageFailure ? 'error' : 'synced');
       }
     });
 
@@ -577,7 +553,8 @@ function MainApp() {
         saveMonthToFirestoreSerialized(user.uid, targetMonthKey, tYear, tMonth, updatedTarget)
           .then(() => {
             removePendingMonthFromQueue(user.uid, targetMonthKey, opId);
-            setSyncStatus('synced');
+            const hasConflicts = Object.keys(unresolvedConflictsRef.current).length > 0;
+            setSyncStatus(hasConflicts || !localSaveSuccess ? 'error' : 'synced');
           })
           .catch(err => {
             console.warn(`Sync to Google interrupted for ${targetMonthKey}, queued:`, err);
