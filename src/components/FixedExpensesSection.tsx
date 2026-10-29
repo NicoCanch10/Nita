@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FixedExpense, CurrencyCode, CategoryInfo } from '../types/budget';
 import { formatCurrency, getCategoryInfo } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
@@ -34,6 +34,37 @@ interface FixedExpensesSectionProps {
   daysInMonth?: number;
 }
 
+export function parseAmountInput(val: string | number): number {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  let clean = String(val).replace(/[$€\s]/g, '').trim();
+  if (!clean) return 0;
+
+  if (clean.includes('.') && clean.includes(',')) {
+    if (clean.lastIndexOf('.') < clean.lastIndexOf(',')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else {
+      clean = clean.replace(/,/g, '');
+    }
+  } else if (clean.includes(',')) {
+    const parts = clean.split(',');
+    if (parts.length > 2) {
+      clean = clean.replace(/,/g, '');
+    } else {
+      clean = clean.replace(',', '.');
+    }
+  } else if (clean.includes('.')) {
+    const parts = clean.split('.');
+    if (parts.length > 2) {
+      clean = clean.replace(/\./g, '');
+    } else if (parts[1].length === 3 && parts[0].length >= 1) {
+      clean = clean.replace('.', '');
+    }
+  }
+  const parsed = parseFloat(clean);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
 export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   expenses,
   categories,
@@ -53,29 +84,44 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   const t = getTranslations(language);
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState<string>(categories[0]?.id || 'housing');
+  const [category, setCategory] = useState<string>(() => categories[0]?.id || 'housing');
   const [dueDate, setDueDate] = useState<string>('');
   const [filterState, setFilterState] = useState<'all' | 'pending' | 'paid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
 
+  // Sync category state when categories change or if current category is invalid
+  useEffect(() => {
+    if (categories.length > 0 && (!category || !categories.some(c => c.id === category))) {
+      setCategory(categories[0].id);
+    }
+  }, [categories, category]);
+
   // Editing state for existing fixed expenses
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [editName, setEditName] = useState<string>('');
   const [editAmount, setEditAmount] = useState<string>('');
+  const [editCategory, setEditCategory] = useState<string>('');
   const [editDueDate, setEditDueDate] = useState<string>('');
 
   const startEditExpense = (expense: FixedExpense) => {
     setEditingExpenseId(expense.id);
-    setEditAmount(String(expense.amount));
+    setEditName(expense.name || '');
+    setEditAmount(expense.amount ? String(expense.amount) : '');
+    setEditCategory(expense.category || categories[0]?.id || 'housing');
     setEditDueDate(expense.dueDate ? String(expense.dueDate) : '');
   };
 
   const handleSaveEditExpense = (id: string) => {
-    const numAmount = Number(editAmount);
+    const finalName = editName.trim();
+    if (!finalName) return;
+    const numAmount = parseAmountInput(editAmount);
     if (!numAmount || numAmount <= 0) return;
     const numDueDate = editDueDate.trim() ? Math.min(daysInMonth, Math.max(1, parseInt(editDueDate, 10))) : undefined;
     onUpdateExpense(id, {
+      name: finalName,
       amount: numAmount,
+      category: editCategory || categories[0]?.id || 'housing',
       dueDate: numDueDate,
     });
     setEditingExpenseId(null);
@@ -83,19 +129,26 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
 
   const handleCancelEditExpense = () => {
     setEditingExpenseId(null);
+    setEditName('');
     setEditAmount('');
+    setEditCategory('');
     setEditDueDate('');
   };
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !amount || Number(amount) <= 0) return;
+    const finalName = name.trim();
+    const numAmount = parseAmountInput(amount);
+    if (!finalName || !numAmount || numAmount <= 0) return;
+
+    const finalCategory = category || categories[0]?.id || 'housing';
+    const numDueDate = dueDate.trim() ? Math.min(daysInMonth, Math.max(1, parseInt(dueDate, 10))) : undefined;
 
     onAddExpense({
-      name: name.trim(),
-      amount: Number(amount),
-      category,
-      dueDate: dueDate.trim() ? Math.min(daysInMonth, Math.max(1, parseInt(dueDate, 10))) : undefined,
+      name: finalName,
+      amount: numAmount,
+      category: finalCategory,
+      dueDate: numDueDate,
       isPaid: false,
     });
 
@@ -104,28 +157,34 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
     setDueDate('');
   };
 
+  // Safe defensively-coalesced expenses
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+
   // Sort fixed expenses alphabetically by name
-  const filteredExpenses = expenses
+  const filteredExpenses = safeExpenses
     .filter(expense => {
+      if (!expense) return false;
+      const isPaid = Boolean(expense.isPaid);
       const matchesFilter =
         filterState === 'all' ||
-        (filterState === 'paid' && expense.isPaid) ||
-        (filterState === 'pending' && !expense.isPaid);
+        (filterState === 'paid' && isPaid) ||
+        (filterState === 'pending' && !isPaid);
 
-      const matchesSearch = expense.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const expName = String(expense.name || '');
+      const matchesSearch = expName.toLowerCase().includes(searchQuery.toLowerCase().trim());
       return matchesFilter && matchesSearch;
     })
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' }));
 
   // Sort categories alphabetically for dropdown selector
-  const sortedCategories = [...categories].sort((a, b) => {
+  const sortedCategories = [...(categories || [])].sort((a, b) => {
     const labelA = getCategoryInfo(a.id, categories, language).label;
     const labelB = getCategoryInfo(b.id, categories, language).label;
     return labelA.localeCompare(labelB, undefined, { sensitivity: 'base' });
   });
 
-  const totalFixed = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const paidCount = expenses.filter(e => e.isPaid).length;
+  const totalFixed = safeExpenses.reduce((sum, e) => sum + (Number(e?.amount) || 0), 0);
+  const paidCount = safeExpenses.filter(e => Boolean(e?.isPaid)).length;
 
   const currentCategoryInfo = getCategoryInfo(category, categories, language);
 
@@ -199,9 +258,8 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
             {/* Amount input (reduced on mobile: 5 cols out of 12) */}
             <div className="col-span-5 sm:col-span-6 relative">
               <input
-                type="number"
-                min="0.01"
-                step="any"
+                type="text"
+                inputMode="decimal"
                 placeholder={t.amountPlaceholder}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
@@ -413,30 +471,80 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
 
                 {/* Amount, inline edit, and actions */}
                 {editingExpenseId === expense.id ? (
-                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 bg-slate-50 dark:bg-slate-800/90 p-1.5 sm:p-2 rounded-xl border border-blue-300 dark:border-blue-700 shadow-xs">
-                    {/* Modificar importe arriba, vencimiento abajo */}
-                    <div className="flex flex-col gap-1.5">
-                      {/* Modificar importe (arriba) */}
-                      <div className="flex items-center gap-1">
-                        <span className="text-2xs text-slate-400 font-bold w-3.5 text-center shrink-0">$</span>
+                  <div className="w-full bg-blue-50/80 dark:bg-slate-800/90 p-3 sm:p-4 rounded-2xl border border-blue-300 dark:border-blue-700 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between gap-2 border-b border-blue-200/60 dark:border-slate-700/60 pb-2">
+                      <span className="text-xs font-black text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
+                        <Pencil className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        Modificar Gasto Fijo
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDeleteExpense(expense.id);
+                          setEditingExpenseId(null);
+                        }}
+                        title="Eliminar este gasto"
+                        className="text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/60 px-2 py-1 rounded-lg text-2xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Eliminar</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3 items-center">
+                      {/* Concepto / Nombre */}
+                      <div className="sm:col-span-5">
+                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          Concepto
+                        </label>
                         <input
-                          type="number"
-                          min="0.01"
-                          step="any"
-                          value={editAmount}
-                          onChange={(e) => setEditAmount(e.target.value)}
-                          placeholder="Monto"
-                          className="w-20 sm:w-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5 sm:py-1 text-xs text-slate-900 dark:text-white font-bold tabular-nums focus:outline-hidden focus:border-blue-500"
-                          title="Modificar importe"
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          placeholder="Concepto"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
                           autoFocus
                         />
                       </div>
 
-                      {/* Modificar vencimiento (abajo) */}
-                      <div className="flex items-center gap-1">
-                        <span className="flex items-center justify-center w-3.5 shrink-0" title={t.dueDayShort}>
-                          <Calendar className="w-3 h-3 text-slate-400" />
-                        </span>
+                      {/* Monto */}
+                      <div className="sm:col-span-3">
+                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          Importe ({currency})
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={editAmount}
+                          onChange={(e) => setEditAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
+                        />
+                      </div>
+
+                      {/* Categoría */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          Categoría
+                        </label>
+                        <select
+                          value={editCategory}
+                          onChange={(e) => setEditCategory(e.target.value)}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer truncate"
+                        >
+                          {sortedCategories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {getCategoryInfo(c.id, categories, language).label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Vencimiento */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          Vto (1-{daysInMonth})
+                        </label>
                         <input
                           type="number"
                           min="1"
@@ -450,39 +558,32 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                             }
                             const num = parseInt(val, 10);
                             if (!isNaN(num)) {
-                              if (num > daysInMonth) {
-                                setEditDueDate(String(daysInMonth));
-                              } else if (num < 1) {
-                                setEditDueDate('1');
-                              } else {
-                                setEditDueDate(val);
-                              }
+                              if (num > daysInMonth) setEditDueDate(String(daysInMonth));
+                              else if (num < 1) setEditDueDate('1');
+                              else setEditDueDate(val);
                             }
                           }}
-                          placeholder={`Vto: 1-${daysInMonth}`}
-                          className="w-20 sm:w-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-1.5 py-0.5 sm:py-1 text-xs text-slate-900 dark:text-white font-bold text-center tabular-nums focus:outline-hidden focus:border-blue-500"
-                          title={t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)}
+                          placeholder="Opcional"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold text-center tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
                         />
                       </div>
                     </div>
 
-                    {/* Botones de acción (Guardar y Cancelar) */}
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleSaveEditExpense(expense.id)}
-                        title="Guardar cambios"
-                        className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs flex items-center justify-center"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                      </button>
+                    <div className="flex items-center justify-end gap-2 pt-1">
                       <button
                         type="button"
                         onClick={handleCancelEditExpense}
-                        title="Cancelar edición"
-                        className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center"
+                        className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold transition-colors cursor-pointer"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEditExpense(expense.id)}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Guardar Cambios</span>
                       </button>
                     </div>
                   </div>
@@ -497,7 +598,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                     <button
                       type="button"
                       onClick={() => startEditExpense(expense)}
-                      title="Editar valor y fecha de vencimiento"
+                      title="Editar gasto (concepto, monto, categoría o vencimiento)"
                       className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-xl transition-colors cursor-pointer"
                     >
                       <Pencil className="w-4 h-4" />

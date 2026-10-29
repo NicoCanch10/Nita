@@ -22,8 +22,20 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Configure Firestore SDK log level to 'error' to avoid benign sub-millisecond clock drift warnings in console
-setLogLevel('error');
+// Configure Firestore SDK log level to 'silent' to silence internal IndexedDB lease jitter and sub-millisecond clock drift warnings
+setLogLevel('silent');
+
+// In browser environment, filter out benign internal Firestore multi-tab lease jitter warnings
+if (typeof window !== 'undefined') {
+  const origError = console.error;
+  console.error = (...args: unknown[]) => {
+    const first = typeof args[0] === 'string' ? args[0] : '';
+    if (first.includes('Detected an update time that is in the future')) {
+      return;
+    }
+    origError.apply(console, args);
+  };
+}
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();

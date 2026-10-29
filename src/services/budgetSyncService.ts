@@ -392,7 +392,8 @@ export function processRemoteMonthsSnapshot(
   pendingExpenseIds: Set<string>,
   pendingFixedIds: Set<string>,
   deletedExpenseIds: Map<string, number>,
-  deletedFixedIds: Map<string, number>
+  deletedFixedIds: Map<string, number>,
+  modifiedFixedIds?: Map<string, number>
 ): {
   updatedMonths: Record<string, MonthData>;
   updatedConflicts: Record<string, MonthConflictInfo>;
@@ -463,6 +464,31 @@ export function processRemoteMonthsSnapshot(
     );
     cleanRemoteFixed.forEach(e => pendingFixedIds.delete(e.id));
 
+    // Preserve locally modified fixed expenses whose remote confirmation hasn't caught up (15-second grace period)
+    const reconciledFixed = cleanRemoteFixed.map(rExp => {
+      const modifiedAt = modifiedFixedIds?.get(rExp.id);
+      if (modifiedAt && (now - modifiedAt < 15000)) {
+        const localExp = (localData.fixedExpenses || []).find(l => l.id === rExp.id);
+        if (localExp) {
+          const isRemoteUpdated =
+            rExp.name === localExp.name &&
+            Number(rExp.amount) === Number(localExp.amount) &&
+            rExp.category === localExp.category &&
+            Boolean(rExp.isPaid) === Boolean(localExp.isPaid) &&
+            (rExp.dueDate ?? null) === (localExp.dueDate ?? null);
+
+          if (isRemoteUpdated) {
+            modifiedFixedIds?.delete(rExp.id);
+            return rExp;
+          }
+          return localExp;
+        }
+      } else if (modifiedAt) {
+        modifiedFixedIds?.delete(rExp.id);
+      }
+      return rExp;
+    });
+
     // 5. Preserve any variable expenses that were added locally and are still pending remote confirmation
     const cleanRemoteVarIds = new Set(cleanRemoteVar.map(e => e.id));
     const pendingVarExpenses = (localData.variableExpenses || []).filter(
@@ -473,7 +499,7 @@ export function processRemoteMonthsSnapshot(
     updatedMonths[mKey] = {
       ...remoteData,
       variableExpenses: [...cleanRemoteVar, ...pendingVarExpenses],
-      fixedExpenses: [...cleanRemoteFixed, ...pendingFixExpenses],
+      fixedExpenses: [...reconciledFixed, ...pendingFixExpenses],
     };
   }
 
@@ -482,6 +508,36 @@ export function processRemoteMonthsSnapshot(
     updatedConflicts,
     conflictCount: Object.keys(updatedConflicts).length,
   };
+}
+
+/**
+ * Direct fetch of all months from Google Firestore for a user.
+ * Used for instant on-demand and foreground multi-device synchronization.
+ */
+export async function fetchMonthsFromFirestore(userId: string): Promise<Record<string, MonthData>> {
+  const monthsColRef = collection(db, 'users', userId, 'months');
+  const remoteMonths: Record<string, MonthData> = {};
+  try {
+    const monthsSnap = await withTimeout(getDocs(monthsColRef), 8000);
+    monthsSnap.forEach((dSnap) => {
+      const d = dSnap.data() as UserMonthDoc;
+      if (d && d.monthKey) {
+        remoteMonths[d.monthKey] = {
+          income: Number(d.income) || 0,
+          savingsRate: Number(d.savingsRate) || 0,
+          extraDaysPosition: d.extraDaysPosition ?? 'end',
+          categories: parseCategories(d.categories),
+          fixedExpenses: parseFixedExpenses(d.fixedExpenses),
+          variableExpenses: parseVariableExpenses(d.variableExpenses),
+          jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
+          lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
+        };
+      }
+    });
+  } catch (error) {
+    console.warn(`[Sync] Could not fetch months for user ${userId}:`, error);
+  }
+  return remoteMonths;
 }
 
 /**
@@ -540,22 +596,8 @@ export async function fetchAndSyncUserData(
     Object.assign(remoteMonths, fetched);
   } else {
     try {
-      const monthsSnap = await getDocs(monthsColRef);
-      monthsSnap.forEach((dSnap) => {
-        const d = dSnap.data() as UserMonthDoc;
-        if (d && d.monthKey) {
-          remoteMonths[d.monthKey] = {
-            income: Number(d.income) || 0,
-            savingsRate: Number(d.savingsRate) || 0,
-            extraDaysPosition: d.extraDaysPosition ?? 'end',
-            categories: parseCategories(d.categories),
-            fixedExpenses: parseFixedExpenses(d.fixedExpenses),
-            variableExpenses: parseVariableExpenses(d.variableExpenses),
-            jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
-            lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
-          };
-        }
-      });
+      const fetched = await fetchMonthsFromFirestore(userId);
+      Object.assign(remoteMonths, fetched);
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, `users/${userId}/months`);
     }

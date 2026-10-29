@@ -62,7 +62,9 @@ import {
   processPendingSyncQueue,
   getPendingConflicts,
   savePendingConflicts,
+  clearPendingConflict,
   processRemoteMonthsSnapshot,
+  fetchMonthsFromFirestore,
   MonthConflictInfo
 } from './services/budgetSyncService';
 import { 
@@ -74,7 +76,8 @@ import {
   Info,
   Sparkles,
   X,
-  Loader2 
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 
 function MainApp() {
@@ -86,10 +89,16 @@ function MainApp() {
   const pendingFixedIdsRef = useRef<Set<string>>(new Set());
   const deletedFixedIdsRef = useRef<Map<string, number>>(new Map());
   const deletedExpenseIdsRef = useRef<Map<string, number>>(new Map());
+  const modifiedFixedIdsRef = useRef<Map<string, number>>(new Map());
   const unresolvedConflictsRef = useRef<Record<string, MonthConflictInfo>>({});
+  const [activeConflicts, setActiveConflicts] = useState<Record<string, MonthConflictInfo>>(() => {
+    return user ? getPendingConflicts(user.uid) : {};
+  });
 
   useEffect(() => {
-    unresolvedConflictsRef.current = user ? getPendingConflicts(user.uid) : {};
+    const loaded = user ? getPendingConflicts(user.uid) : {};
+    unresolvedConflictsRef.current = loaded;
+    setActiveConflicts(loaded);
   }, [user?.uid]);
 
   // Theme state: light or dark mode
@@ -230,6 +239,7 @@ function MainApp() {
         setIsCloudSyncReady(true);
         const activeConflicts = syncResult.conflicts || {};
         unresolvedConflictsRef.current = activeConflicts;
+        setActiveConflicts(activeConflicts);
         if (Object.keys(activeConflicts).length > 0 || syncResult.storageFailed) {
           setSyncStatus('error');
         } else {
@@ -261,6 +271,8 @@ function MainApp() {
   monthRef.current = month;
   const currencyRef = useRef(currency);
   currencyRef.current = currency;
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const syncStatusRef = useRef(syncStatus);
   syncStatusRef.current = syncStatus;
 
@@ -308,6 +320,43 @@ function MainApp() {
       }
     };
 
+    const pullLatestRemote = async () => {
+      if (!user || isOfflineSession || !isFirebaseAuthActive || !isCloudSyncReady) return;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+      try {
+        const remoteMonths = await fetchMonthsFromFirestore(user.uid);
+        if (remoteMonths && Object.keys(remoteMonths).length > 0) {
+          const currentMonths = latestMonthsDataRef.current;
+          const { updatedMonths, updatedConflicts, conflictCount } = processRemoteMonthsSnapshot(
+            remoteMonths,
+            currentMonths,
+            unresolvedConflictsRef.current,
+            pendingExpenseIdsRef.current,
+            pendingFixedIdsRef.current,
+            deletedExpenseIdsRef.current,
+            deletedFixedIdsRef.current,
+            modifiedFixedIdsRef.current
+          );
+          unresolvedConflictsRef.current = updatedConflicts;
+          setActiveConflicts(updatedConflicts);
+          latestMonthsDataRef.current = updatedMonths;
+          setMonthsData(updatedMonths);
+          savePendingConflicts(user.uid, updatedConflicts);
+          saveBudgetState({
+            month: monthRef.current,
+            year: yearRef.current,
+            currency: currencyRef.current,
+            monthsData: updatedMonths,
+          }, user.uid, false);
+          if (conflictCount === 0 && !hasPendingSync(user.uid)) {
+            setSyncStatus('synced');
+          }
+        }
+      } catch (err) {
+        console.warn('Revisión remota en segundo plano:', err);
+      }
+    };
+
     if (isOnline) {
       flushQueue();
     }
@@ -315,9 +364,17 @@ function MainApp() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && (typeof navigator === 'undefined' || navigator.onLine)) {
         flushQueue();
+        pullLatestRemote();
+      }
+    };
+    const handleWindowFocus = () => {
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        flushQueue();
+        pullLatestRemote();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
 
     // Reintento periódico: si la sincronización con Google falló o hay cambios pendientes, vuelve a intentar cada 5 segundos
     const interval = setInterval(() => {
@@ -329,6 +386,7 @@ function MainApp() {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
       clearInterval(interval);
     };
   }, [isOnline, user?.uid, isOfflineSession, isCloudSyncReady, isFirebaseAuthActive]);
@@ -357,10 +415,12 @@ function MainApp() {
           pendingExpenseIdsRef.current,
           pendingFixedIdsRef.current,
           deletedExpenseIdsRef.current,
-          deletedFixedIdsRef.current
+          deletedFixedIdsRef.current,
+          modifiedFixedIdsRef.current
         );
 
         unresolvedConflictsRef.current = updatedConflicts;
+        setActiveConflicts(updatedConflicts);
         latestMonthsDataRef.current = updatedMonths;
         setMonthsData(updatedMonths);
 
@@ -417,10 +477,10 @@ function MainApp() {
 
     // 3. User profile settings real-time subscription
     const unsubProfile = subscribeToUserProfile(user.uid, (profile) => {
-      if (profile.currency && profile.currency !== currency) {
+      if (profile.currency && profile.currency !== currencyRef.current) {
         setCurrency(profile.currency);
       }
-      if (profile.language && profile.language !== language) {
+      if (profile.language && profile.language !== languageRef.current) {
         setLanguage(profile.language);
         saveSelectedLanguage(profile.language);
       }
@@ -571,6 +631,68 @@ function MainApp() {
   // Helper to mutate only the active month's data cleanly and instantly in state
   const updateActiveMonth = (updater: (prev: MonthData) => MonthData) => {
     mutateMonthData(currentKey, updater);
+  };
+
+  const handleResolveConflictWithRemote = (monthKey: string) => {
+    if (!user) return;
+    const conflict = activeConflicts[monthKey];
+    if (!conflict) return;
+
+    const nextMap = {
+      ...latestMonthsDataRef.current,
+      [monthKey]: conflict.remote,
+    };
+    latestMonthsDataRef.current = nextMap;
+    setMonthsData(nextMap);
+
+    saveBudgetState({
+      month: monthRef.current,
+      year: yearRef.current,
+      currency: currencyRef.current,
+      monthsData: nextMap,
+    }, user.uid, false);
+
+    clearPendingConflict(user.uid, monthKey);
+    const remaining = { ...unresolvedConflictsRef.current };
+    delete remaining[monthKey];
+    unresolvedConflictsRef.current = remaining;
+    setActiveConflicts(remaining);
+
+    if (Object.keys(remaining).length === 0 && !hasPendingSync(user.uid)) {
+      setSyncStatus('synced');
+    }
+  };
+
+  const handleResolveConflictWithLocal = async (monthKey: string) => {
+    if (!user) return;
+    const localMonth = latestMonthsDataRef.current[monthKey];
+    if (!localMonth) return;
+
+    const [yStr, mStr] = monthKey.split('-');
+    const y = parseInt(yStr, 10);
+    const m = parseInt(mStr, 10) - 1;
+
+    clearPendingConflict(user.uid, monthKey);
+    const remaining = { ...unresolvedConflictsRef.current };
+    delete remaining[monthKey];
+    unresolvedConflictsRef.current = remaining;
+    setActiveConflicts(remaining);
+
+    if (isOnline && !isOfflineSession && isFirebaseAuthActive) {
+      setSyncStatus('syncing');
+      try {
+        await saveMonthToFirestoreSerialized(user.uid, monthKey, y, m, localMonth);
+        if (Object.keys(remaining).length === 0 && !hasPendingSync(user.uid)) {
+          setSyncStatus('synced');
+        }
+      } catch {
+        enqueuePendingMonth(user.uid, monthKey, y, m, localMonth, generateOpId());
+        setSyncStatus('error');
+      }
+    } else {
+      enqueuePendingMonth(user.uid, monthKey, y, m, localMonth, generateOpId());
+      setSyncStatus('offline');
+    }
   };
 
   // Values extracted from active month
@@ -948,6 +1070,7 @@ function MainApp() {
     };
     pendingFixedIdsRef.current.add(newExpense.id);
     deletedFixedIdsRef.current.delete(newExpense.id);
+    modifiedFixedIdsRef.current.delete(newExpense.id);
 
     mutateMonthData(currentKey, currentMonth => ({
       ...currentMonth,
@@ -958,6 +1081,7 @@ function MainApp() {
   const handleDeleteFixedExpense = (id: string) => {
     deletedFixedIdsRef.current.set(id, Date.now());
     pendingFixedIdsRef.current.delete(id);
+    modifiedFixedIdsRef.current.delete(id);
 
     mutateMonthData(currentKey, currentMonth => ({
       ...currentMonth,
@@ -966,6 +1090,9 @@ function MainApp() {
   };
 
   const handleToggleFixedExpensePaid = (id: string) => {
+    modifiedFixedIdsRef.current.set(id, Date.now());
+    deletedFixedIdsRef.current.delete(id);
+
     mutateMonthData(currentKey, currentMonth => ({
       ...currentMonth,
       fixedExpenses: (currentMonth.fixedExpenses || []).map(e => e.id === id ? { ...e, isPaid: !e.isPaid } : e),
@@ -973,6 +1100,9 @@ function MainApp() {
   };
 
   const handleUpdateFixedExpense = (id: string, updatedFields: Partial<FixedExpense>) => {
+    modifiedFixedIdsRef.current.set(id, Date.now());
+    deletedFixedIdsRef.current.delete(id);
+
     mutateMonthData(currentKey, currentMonth => ({
       ...currentMonth,
       fixedExpenses: (currentMonth.fixedExpenses || []).map(e => e.id === id ? { ...e, ...updatedFields } : e),
@@ -1111,6 +1241,51 @@ function MainApp() {
       {/* Main Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-28 sm:pb-6 space-y-6">
         
+        {/* Banner de Resolución de Conflictos entre Dispositivos */}
+        {Object.keys(activeConflicts).length > 0 && (
+          <div className="space-y-3">
+            {Object.entries(activeConflicts).map(([mKey]) => {
+              const [cYear, cMonthNum] = mKey.split('-');
+              const monthLabel = monthNames[parseInt(cMonthNum, 10) - 1] || mKey;
+              return (
+                <div 
+                  key={mKey}
+                  className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-2xl p-4 sm:p-5 shadow-sm text-xs space-y-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-amber-900 dark:text-amber-200 text-sm">
+                        Cambios concurrentes en otro dispositivo ({monthLabel} {cYear})
+                      </h4>
+                      <p className="text-amber-800/90 dark:text-amber-300/80 leading-relaxed">
+                        Este mes se modificó en otro dispositivo mientras tenías cambios locales pendientes.
+                        Tus datos locales están protegidos y no han sido sobrescritos. Selecciona qué versión deseas conservar:
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1 sm:pl-8">
+                    <button
+                      type="button"
+                      onClick={() => handleResolveConflictWithRemote(mKey)}
+                      className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
+                    >
+                      Aceptar versión de la nube (otro dispositivo)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleResolveConflictWithLocal(mKey)}
+                      className="px-3.5 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 font-extrabold rounded-xl transition-all cursor-pointer shadow-2xs active:scale-95"
+                    >
+                      Conservar versión de este dispositivo
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Desktop Navigation Tabs Bar (Visible únicamente en pantallas medianas y de escritorio: sm en adelante) */}
         <div className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-1.5 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-xs transition-colors">
           <button
