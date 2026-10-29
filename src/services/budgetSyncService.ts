@@ -7,7 +7,7 @@ import {
   onSnapshot, 
   Unsubscribe 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
   BudgetState, 
   MonthData, 
@@ -518,7 +518,7 @@ export async function fetchMonthsFromFirestore(userId: string): Promise<Record<s
   const monthsColRef = collection(db, 'users', userId, 'months');
   const remoteMonths: Record<string, MonthData> = {};
   try {
-    const monthsSnap = await withTimeout(getDocs(monthsColRef), 8000);
+    const monthsSnap = await withTimeout(getDocs(monthsColRef), 25000);
     monthsSnap.forEach((dSnap) => {
       const d = dSnap.data() as UserMonthDoc;
       if (d && d.monthKey) {
@@ -856,10 +856,10 @@ export async function migrateLocalDataToFirestoreIfEmpty(
 }
 
 /**
- * Wraps an async Firestore promise with a network timeout (default 8s)
- * to prevent hanging or blocking on intermittent 4G/5G mobile connections.
+ * Wraps an async Firestore promise with a network timeout (default 25s)
+ * to prevent hanging indefinitely while allowing full completion over slow mobile networks.
  */
-export function withTimeout<T>(promise: Promise<T>, timeoutMs = 8000): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, timeoutMs = 25000): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`Timeout de red (${timeoutMs}ms) al comunicarse con Google Firestore`));
@@ -907,7 +907,7 @@ export async function saveMonthToFirestore(
       lastJarAdjustmentLog: data.lastJarAdjustmentLog ? cleanForFirestore(data.lastJarAdjustmentLog) : null,
       updatedAt: new Date().toISOString(),
     });
-    await withTimeout(setDoc(monthDocRef, payload), 8000);
+    await withTimeout(setDoc(monthDocRef, payload), 25000);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -928,7 +928,7 @@ export async function saveGlobalCategoriesToFirestore(
       categories: (categories || []).map(cleanCategory),
       updatedAt: new Date().toISOString(),
     });
-    await withTimeout(setDoc(catsRef, payload), 8000);
+    await withTimeout(setDoc(catsRef, payload), 25000);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -950,7 +950,7 @@ export async function saveUserPreferencesToFirestore(
         ...preferences,
         updatedAt: new Date().toISOString(),
       }), { merge: true }),
-      8000
+      25000
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -1140,6 +1140,11 @@ export async function processPendingSyncQueue(
   userId: string
 ): Promise<{ syncedCount: number; remainingCount: number }> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    const q = getPendingSyncQueue(userId);
+    return { syncedCount: 0, remainingCount: q.length };
+  }
+
+  if (typeof window !== 'undefined' && auth.currentUser && auth.currentUser.uid !== userId) {
     const q = getPendingSyncQueue(userId);
     return { syncedCount: 0, remainingCount: q.length };
   }

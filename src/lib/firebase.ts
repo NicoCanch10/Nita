@@ -109,8 +109,17 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const errCode = (error as any)?.code || '';
+  const isPermission = 
+    errCode === 'permission-denied' || 
+    errCode === 'firestore/permission-denied' || 
+    errMsg.includes('Missing or insufficient permissions') ||
+    errMsg.includes('permission-denied') ||
+    errMsg.includes('PERMISSION_DENIED');
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -125,8 +134,14 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path,
   };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+
+  if (isPermission) {
+    console.error('Firestore Error:', JSON.stringify(errInfo));
+    throw new Error(JSON.stringify(errInfo));
+  }
+
+  console.warn(`[Firestore ${operationType} warning on ${path}]:`, errMsg);
+  throw error instanceof Error ? error : new Error(errMsg);
 }
 
 // Connection test as required by skill, guarded against offline PWA mode
