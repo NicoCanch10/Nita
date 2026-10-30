@@ -40,12 +40,15 @@ interface HeaderProps {
   onCurrencyChange: (currency: CurrencyCode) => void;
   onReset: () => void;
   onExport: () => void;
-  onTogglePaid: (expenseId: string) => void;
+  onTogglePaid: (expenseId: string, monthKey?: string) => void;
   alertSettings?: DueDateAlertSettings;
   onAlertSettingsChange?: (settings: DueDateAlertSettings) => void;
   language?: string;
   onLanguageChange?: (code: string) => void;
   syncStatus?: 'idle' | 'syncing' | 'synced' | 'error' | 'offline' | 'unauthenticated';
+  nextMonthExpenses?: FixedExpense[];
+  nextMonthYear?: number;
+  nextMonth?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -76,6 +79,9 @@ export const Header: React.FC<HeaderProps> = ({
   language,
   onLanguageChange,
   syncStatus = 'idle',
+  nextMonthExpenses,
+  nextMonthYear,
+  nextMonth,
 }) => {
   const { user, isFirebaseAuthActive, isOnline, isOfflineSession, signInWithGoogle } = useAuth();
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
@@ -284,6 +290,9 @@ export const Header: React.FC<HeaderProps> = ({
               language={language}
               year={year}
               month={month}
+              nextMonthExpenses={nextMonthExpenses}
+              nextMonthYear={nextMonthYear}
+              nextMonth={nextMonth}
             />
 
             {/* Settings Gear Button (Rueda de configuraciones con Modo Oscuro/Blanco, App, Actualizaciones, Avisos de vencimientos, etc.) */}

@@ -773,6 +773,25 @@ function MainApp() {
     return fixedExpenses.filter(e => !e.isPaid).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   }, [fixedExpenses]);
 
+  // Subsequent month details for cross-month upcoming due date alerts
+  const nextMonth = useMemo(() => (month === 11 ? 0 : month + 1), [month]);
+  const nextYear = useMemo(() => (month === 11 ? year + 1 : year), [month, year]);
+  const nextMonthKey = useMemo(() => getMonthKey(nextYear, nextMonth), [nextYear, nextMonth]);
+  const nextMonthExpenses = useMemo(() => {
+    if (monthsData[nextMonthKey]?.fixedExpenses?.length) {
+      return monthsData[nextMonthKey].fixedExpenses;
+    }
+    try {
+      const stored = loadBudgetState(user?.uid || getStoredUserId(), isGuestMode);
+      if (stored?.monthsData?.[nextMonthKey]?.fixedExpenses?.length) {
+        return stored.monthsData[nextMonthKey].fixedExpenses;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }, [monthsData, nextMonthKey, user?.uid, isGuestMode]);
+
   // Monthly remaining: Income - Fixed Expenses - Total Savings
   const monthlyRemaining = useMemo(() => {
     const rem = income - totalFixedExpenses - totalSavings;
@@ -1139,14 +1158,32 @@ function MainApp() {
     }));
   };
 
-  const handleToggleFixedExpensePaid = (id: string) => {
+  const handleToggleFixedExpensePaid = (id: string, targetMonthKey?: string) => {
+    let keyToUpdate = targetMonthKey || currentKey;
+    if (!targetMonthKey) {
+      const foundEntry = Object.entries(latestMonthsDataRef.current).find(([_, mData]) =>
+        (mData.fixedExpenses || []).some(e => e.id === id)
+      );
+      if (foundEntry) {
+        keyToUpdate = foundEntry[0];
+      }
+    }
+
     modifiedFixedIdsRef.current.set(id, Date.now());
     deletedFixedIdsRef.current.delete(id);
 
-    mutateMonthData(currentKey, currentMonth => ({
-      ...currentMonth,
-      fixedExpenses: (currentMonth.fixedExpenses || []).map(e => e.id === id ? { ...e, isPaid: !e.isPaid } : e),
-    }));
+    const [tYearStr, tMonthStr] = keyToUpdate.split('-');
+    const tYear = parseInt(tYearStr, 10) || year;
+    const tMonth = (parseInt(tMonthStr, 10) - 1) || month;
+
+    mutateMonthData(
+      keyToUpdate,
+      monthData => ({
+        ...monthData,
+        fixedExpenses: (monthData.fixedExpenses || []).map(e => e.id === id ? { ...e, isPaid: !e.isPaid } : e),
+      }),
+      { targetYear: tYear, targetMonth: tMonth }
+    );
   };
 
   const handleUpdateFixedExpense = (id: string, updatedFields: Partial<FixedExpense>) => {
@@ -1285,6 +1322,9 @@ function MainApp() {
           language={language}
           onLanguageChange={handleLanguageChange}
           syncStatus={syncStatus}
+          nextMonthExpenses={nextMonthExpenses}
+          nextMonthYear={nextYear}
+          nextMonth={nextMonth}
         />
       </div>
 
@@ -1417,6 +1457,9 @@ function MainApp() {
               language={language}
               year={year}
               month={month}
+              nextMonthExpenses={nextMonthExpenses}
+              nextMonthYear={nextYear}
+              nextMonth={nextMonth}
             />
 
             {/* Optional Manual Clone Banner if current month is empty and previous month has data */}

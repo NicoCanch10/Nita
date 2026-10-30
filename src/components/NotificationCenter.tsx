@@ -27,11 +27,14 @@ interface NotificationCenterProps {
   categories: CategoryInfo[];
   currency: CurrencyCode;
   currentDay: number | null;
-  onTogglePaid: (expenseId: string) => void;
+  onTogglePaid: (expenseId: string, monthKey?: string) => void;
   alertSettings?: DueDateAlertSettings;
   language?: string;
   year?: number;
   month?: number;
+  nextMonthExpenses?: FixedExpense[];
+  nextMonthYear?: number;
+  nextMonth?: number;
 }
 
 export const NotificationCenter: React.FC<NotificationCenterProps> = ({
@@ -44,6 +47,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   language = 'es',
   year,
   month,
+  nextMonthExpenses,
+  nextMonthYear,
+  nextMonth,
 }) => {
   const t = getTranslations(language);
   const [isOpen, setIsOpen] = useState(false);
@@ -52,7 +58,18 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   );
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const notifications = getExpenseNotifications(expenses, currentDay, alertSettings, language, year, month);
+  const notifications = getExpenseNotifications(
+    expenses,
+    currentDay,
+    alertSettings,
+    language,
+    year,
+    month,
+    undefined,
+    nextMonthExpenses,
+    nextMonthYear,
+    nextMonth
+  );
   const criticalCount = notifications.filter(n => n.type === 'today' || n.type === 'in_3_days' || n.type === 'upcoming').length;
   const totalAlerts = notifications.length;
 
@@ -222,14 +239,17 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                           {formatCurrency(item.amount, currency)}
                         </span>
                         <span>·</span>
-                        <span>{t.dueDayShort}: {item.dueDate}</span>
+                        <span>
+                          {t.dueDayShort}: {item.dueDate}
+                          {item.isNextMonth && item.monthName ? ` (${item.monthName})` : ''}
+                        </span>
                       </div>
                     </div>
 
                     {/* Quick Pay Action */}
                     <button
                       type="button"
-                      onClick={() => onTogglePaid(item.expenseId)}
+                      onClick={() => onTogglePaid(item.expenseId, item.monthKey)}
                       className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-2xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 shadow-2xs"
                       title={t.markPaid}
                     >

@@ -236,4 +236,130 @@ describe('NITA — Notificaciones de vencimientos entre meses (Octubre vs Noviem
     assert.equal(notifs[0].daysLeft, 0);
     assert.equal(notifs[0].type, 'today');
   });
+
+  test('6. Caso de usuario: En Octubre con vencimiento de gasto fijo en Noviembre, la alerta figura en Octubre si coincide con la anticipación configurada', () => {
+    // Usuario se encuentra en 30 de Octubre de 2026
+    const todayOct30 = new Date(2026, 9, 30, 10, 0, 0);
+
+    // Gastos fijos de Octubre
+    const octExpenses: FixedExpense[] = [];
+
+    // Gasto fijo cargado en Noviembre con vencimiento el 2 de Noviembre
+    const novExpenses: FixedExpense[] = [
+      {
+        id: 'f_nov_internet',
+        name: 'Internet Fibra',
+        amount: 28000,
+        category: 'services',
+        dueDate: 2, // 2 de Noviembre
+        isPaid: false,
+      },
+    ];
+
+    // Escenario A: Usuario configuró alerta para 3 días antes
+    const settings3: DueDateAlertSettings = { enabled: true, daysInAdvance: 3 };
+    const notifsOct = getExpenseNotifications(
+      octExpenses,
+      30,
+      settings3,
+      'es',
+      2026,
+      9, // Octubre
+      todayOct30,
+      novExpenses,
+      2026,
+      10 // Noviembre
+    );
+
+    // Debe figurar la alerta en Octubre porque faltan exactamente 3 días (31 Oct, 1 Nov, 2 Nov)
+    assert.equal(notifsOct.length, 1, 'La alerta de Noviembre debe figurar en Octubre');
+    assert.equal(notifsOct[0].expenseId, 'f_nov_internet');
+    assert.equal(notifsOct[0].daysLeft, 3, 'Faltan exactamente 3 días');
+    assert.equal(notifsOct[0].type, 'in_3_days');
+    assert.equal(notifsOct[0].message, 'Vence en 3 días');
+    assert.equal(notifsOct[0].isNextMonth, true);
+    assert.equal(notifsOct[0].monthName, 'Noviembre');
+
+    // Escenario B: Si el usuario configuró alerta para solo 1 día antes, el 30 de Octubre aún no debe alertar (faltan 3)
+    const settings1: DueDateAlertSettings = { enabled: true, daysInAdvance: 1 };
+    const notifsOctNoAlert = getExpenseNotifications(
+      octExpenses,
+      30,
+      settings1,
+      'es',
+      2026,
+      9,
+      todayOct30,
+      novExpenses,
+      2026,
+      10
+    );
+    assert.equal(notifsOctNoAlert.length, 0, 'No debe alertar si la anticipación configurada es menor a los días restantes');
+
+    // Escenario C: Cuando llega el 1 de Noviembre (falta 1 día para el 2 de Noviembre), con anticipación de 1 día, alerta
+    const todayNov1 = new Date(2026, 10, 1, 10, 0, 0);
+    const notifsNov1 = getExpenseNotifications(
+      novExpenses,
+      1,
+      settings1,
+      'es',
+      2026,
+      10,
+      todayNov1
+    );
+    assert.equal(notifsNov1.length, 1);
+    assert.equal(notifsNov1[0].daysLeft, 1);
+    assert.equal(notifsNov1[0].message, 'Vence mañana');
+  });
+
+  test('7. Convivencia de vencimientos de Octubre y Noviembre simultáneamente en Octubre', () => {
+    const todayOct30 = new Date(2026, 9, 30, 10, 0, 0);
+
+    const octExpenses: FixedExpense[] = [
+      {
+        id: 'f_oct_expensas',
+        name: 'Expensas Octubre',
+        amount: 50000,
+        category: 'housing',
+        dueDate: 31, // Vence el 31 de Octubre (mañana, 1 día)
+        isPaid: false,
+      },
+    ];
+
+    const novExpenses: FixedExpense[] = [
+      {
+        id: 'f_nov_seguro',
+        name: 'Seguro Auto Noviembre',
+        amount: 35000,
+        category: 'transport',
+        dueDate: 2, // Vence el 2 de Noviembre (en 3 días)
+        isPaid: false,
+      },
+    ];
+
+    const settings4: DueDateAlertSettings = { enabled: true, daysInAdvance: 4 };
+    const notifs = getExpenseNotifications(
+      octExpenses,
+      30,
+      settings4,
+      'es',
+      2026,
+      9,
+      todayOct30,
+      novExpenses,
+      2026,
+      10
+    );
+
+    assert.equal(notifs.length, 2, 'Deben figurar ambas alertas en Octubre');
+    // El más próximo primero: Octubre 31 (1 día) antes que Noviembre 2 (3 días)
+    assert.equal(notifs[0].expenseId, 'f_oct_expensas');
+    assert.equal(notifs[0].daysLeft, 1);
+    assert.equal(notifs[0].isNextMonth, false);
+
+    assert.equal(notifs[1].expenseId, 'f_nov_seguro');
+    assert.equal(notifs[1].daysLeft, 3);
+    assert.equal(notifs[1].isNextMonth, true);
+    assert.equal(notifs[1].monthName, 'Noviembre');
+  });
 });

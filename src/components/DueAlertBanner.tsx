@@ -15,11 +15,14 @@ interface DueAlertBannerProps {
   expenses: FixedExpense[];
   currency: CurrencyCode;
   currentDay: number | null;
-  onTogglePaid: (expenseId: string) => void;
+  onTogglePaid: (expenseId: string, monthKey?: string) => void;
   alertSettings?: DueDateAlertSettings;
   language?: string;
   year?: number;
   month?: number;
+  nextMonthExpenses?: FixedExpense[];
+  nextMonthYear?: number;
+  nextMonth?: number;
 }
 
 export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
@@ -31,6 +34,9 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
   language = 'es',
   year,
   month,
+  nextMonthExpenses,
+  nextMonthYear,
+  nextMonth,
 }) => {
   const t = getTranslations(language);
   const [isDismissedSession, setIsDismissedSession] = useState(false);
@@ -45,7 +51,18 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
     return null;
   }
 
-  const allNotifications = getExpenseNotifications(expenses, currentDay, alertSettings, language, activeYear, activeMonth);
+  const allNotifications = getExpenseNotifications(
+    expenses,
+    currentDay,
+    alertSettings,
+    language,
+    activeYear,
+    activeMonth,
+    undefined,
+    nextMonthExpenses,
+    nextMonthYear,
+    nextMonth
+  );
   
   // Critical notifications to alert for in banner:
   // - n.type === 'today': Due today (always shown, NOT filtered by preventive dismissal because due date has arrived)
@@ -55,8 +72,8 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
       return true;
     }
     if (n.type === 'in_3_days' || n.type === 'upcoming') {
-      // Check if user previously closed the preventive notice for this expense
-      if (isPreventiveAlertDismissed(n.expenseId, n.dueDate, activeYear, activeMonth)) {
+      // Check if user previously closed the preventive notice for this expense in its specific month
+      if (isPreventiveAlertDismissed(n.expenseId, n.dueDate, n.targetYear ?? activeYear, n.targetMonth ?? activeMonth)) {
         return false;
       }
       return true;
@@ -76,7 +93,7 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
     // Remember any preventive notice so that it won't appear again until the day of the due date
     const advanceItems = critical.filter(n => n.type === 'in_3_days' || n.type === 'upcoming');
     advanceItems.forEach(item => {
-      dismissPreventiveAlert(item.expenseId, item.dueDate, activeYear, activeMonth);
+      dismissPreventiveAlert(item.expenseId, item.dueDate, item.targetYear ?? activeYear, item.targetMonth ?? activeMonth);
     });
 
     setIsDismissedSession(true);
@@ -127,12 +144,15 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
                   <Clock className="w-3.5 h-3.5 shrink-0" />
                   <span className="font-extrabold break-words">{item.name}:</span>
                   <span className="tabular-nums font-black whitespace-nowrap">{formatCurrency(item.amount, currency)}</span>
-                  <span className="text-3xs font-semibold opacity-85 whitespace-nowrap">({item.type === 'today' ? t.dueTodayNotice : t.daysBeforeDue.replace('{days}', String(item.daysLeft))})</span>
+                  <span className="text-3xs font-semibold opacity-85 whitespace-nowrap">
+                    ({item.type === 'today' ? t.dueTodayNotice : t.daysBeforeDue.replace('{days}', String(item.daysLeft))}
+                    {item.isNextMonth && item.monthName ? ` · ${item.monthName}` : ''})
+                  </span>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => onTogglePaid(item.expenseId)}
+                  onClick={() => onTogglePaid(item.expenseId, item.monthKey)}
                   title={t.markPaid}
                   className="w-full sm:w-auto px-2.5 py-1 sm:py-0.5 mt-1 sm:mt-0 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-300 cursor-pointer font-black text-3xs uppercase tracking-wider border border-emerald-300/80 dark:border-emerald-700/80 shadow-2xs flex items-center justify-center gap-1 transition-colors"
                 >

@@ -100,11 +100,27 @@ export interface ExpenseNotification {
   type: 'today' | 'in_3_days' | 'upcoming' | 'overdue';
   daysLeft: number;
   message: string;
+  targetYear?: number;
+  targetMonth?: number;
+  monthKey?: string;
+  monthName?: string;
+  isNextMonth?: boolean;
 }
+
+const MONTH_NAMES_MAP: Record<string, string[]> = {
+  es: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
+  ca: ['Gener', 'Febrer', 'Març', 'Abril', 'Maig', 'Juny', 'Juliol', 'Agost', 'Setembre', 'Octubre', 'Novembre', 'Desembre'],
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  pt: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'],
+  fr: ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'],
+  it: ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'],
+  de: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+};
 
 /**
  * Calculates notifications for pending fixed expenses based on their due date
  * and the user's custom alert settings (up to 30 days in advance).
+ * Seamlessly supports evaluating upcoming expenses from the subsequent month (e.g. November while in October).
  */
 export function getExpenseNotifications(
   expenses: FixedExpense[],
@@ -113,7 +129,10 @@ export function getExpenseNotifications(
   language: string = 'es',
   year?: number,
   month?: number,
-  referenceDate?: Date
+  referenceDate?: Date,
+  nextMonthExpenses?: FixedExpense[] | null,
+  nextMonthYear?: number,
+  nextMonth?: number
 ): ExpenseNotification[] {
   if (!settings.enabled) {
     return [];
@@ -127,24 +146,51 @@ export function getExpenseNotifications(
 
   const daysInAdvance = Math.min(30, Math.max(1, settings.daysInAdvance));
   const notifications: ExpenseNotification[] = [];
+  const monthNames = MONTH_NAMES_MAP[language] || MONTH_NAMES_MAP['es'];
 
-  // Determine the target year and month for these expenses
-  const expenseYear = year !== undefined && year !== null ? year : currentRealYear;
-  const expenseMonth = month !== undefined && month !== null ? month : currentRealMonth;
+  // Determine the target year and month for the primary active expenses
+  const mainYear = year !== undefined && year !== null ? year : currentRealYear;
+  const mainMonth = month !== undefined && month !== null ? month : currentRealMonth;
 
-  expenses.forEach((expense) => {
+  // Build list of all items to check: primary month expenses + next month expenses (if any)
+  const allItems: Array<{ expense: FixedExpense; expYear: number; expMonth: number; isNextMonth: boolean }> = [];
+
+  (expenses || []).forEach(e => {
+    allItems.push({ expense: e, expYear: mainYear, expMonth: mainMonth, isNextMonth: false });
+  });
+
+  if (nextMonthExpenses && nextMonthExpenses.length > 0) {
+    const nYear = nextMonthYear !== undefined && nextMonthYear !== null
+      ? nextMonthYear
+      : (mainMonth === 11 ? mainYear + 1 : mainYear);
+    const nMonth = nextMonth !== undefined && nextMonth !== null
+      ? nextMonth
+      : (mainMonth === 11 ? 0 : mainMonth + 1);
+
+    nextMonthExpenses.forEach(e => {
+      // Avoid duplicate item if the same ID was somehow already processed
+      if (!allItems.some(item => item.expense.id === e.id)) {
+        allItems.push({ expense: e, expYear: nYear, expMonth: nMonth, isNextMonth: true });
+      }
+    });
+  }
+
+  allItems.forEach(({ expense, expYear, expMonth, isNextMonth }) => {
     if (expense.isPaid || !expense.dueDate) return;
 
     // Sanitize due date against actual days count in the target month (e.g. Feb 28 vs 31)
-    const maxDaysInTargetMonth = new Date(expenseYear, expenseMonth + 1, 0).getDate();
+    const maxDaysInTargetMonth = new Date(expYear, expMonth + 1, 0).getDate();
     const sanitizedDueDay = Math.min(maxDaysInTargetMonth, Math.max(1, Math.round(expense.dueDate)));
 
     // Target due date in the specific month and year of the expense
-    const targetDueDate = new Date(expenseYear, expenseMonth, sanitizedDueDay, 0, 0, 0, 0);
+    const targetDueDate = new Date(expYear, expMonth, sanitizedDueDay, 0, 0, 0, 0);
 
     // Difference in calendar days between today's date and the expense's due date
     const diffTime = targetDueDate.getTime() - todayZero.getTime();
     const diff = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    const targetMonthName = monthNames[expMonth] || '';
+    const mKey = `${expYear}-${String(expMonth + 1).padStart(2, '0')}`;
 
     if (diff === 0) {
       notifications.push({
@@ -156,6 +202,11 @@ export function getExpenseNotifications(
         type: 'today',
         daysLeft: 0,
         message: language === 'es' ? '¡Vence hoy!' : 'Due today!',
+        targetYear: expYear,
+        targetMonth: expMonth,
+        monthKey: mKey,
+        monthName: targetMonthName,
+        isNextMonth,
       });
     } else if (diff > 0 && diff <= daysInAdvance) {
       notifications.push({
@@ -169,9 +220,14 @@ export function getExpenseNotifications(
         message: language === 'es'
           ? (diff === 1 ? 'Vence mañana' : `Vence en ${diff} días`)
           : (diff === 1 ? 'Due tomorrow' : `Due in ${diff} days`),
+        targetYear: expYear,
+        targetMonth: expMonth,
+        monthKey: mKey,
+        monthName: targetMonthName,
+        isNextMonth,
       });
-    } else if (diff < 0) {
-      // Overdue items
+    } else if (diff < 0 && !isNextMonth) {
+      // Overdue items (only from current/past month, not next month)
       notifications.push({
         expenseId: expense.id,
         name: expense.name,
@@ -183,16 +239,21 @@ export function getExpenseNotifications(
         message: language === 'es' 
           ? `Vencido hace ${Math.abs(diff)} día(s)`
           : `Overdue by ${Math.abs(diff)} day(s)`,
+        targetYear: expYear,
+        targetMonth: expMonth,
+        monthKey: mKey,
+        monthName: targetMonthName,
+        isNextMonth: false,
       });
     }
   });
 
-  // Sort: today first, then closest upcoming, then overdue
+  // Sort: today first, then closest upcoming (sorted by daysLeft ascending), then overdue
   const priorityOrder: Record<string, number> = {
     today: 1,
     in_3_days: 2,
-    upcoming: 3,
-    overdue: 4,
+    upcoming: 2,
+    overdue: 3,
   };
 
   return notifications.sort((a, b) => {
