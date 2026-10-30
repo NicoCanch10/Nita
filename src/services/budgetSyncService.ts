@@ -393,7 +393,8 @@ export function processRemoteMonthsSnapshot(
   pendingFixedIds: Set<string>,
   deletedExpenseIds: Map<string, number>,
   deletedFixedIds: Map<string, number>,
-  modifiedFixedIds?: Map<string, number>
+  modifiedFixedIds?: Map<string, number>,
+  userId?: string | null
 ): {
   updatedMonths: Record<string, MonthData>;
   updatedConflicts: Record<string, MonthConflictInfo>;
@@ -402,6 +403,11 @@ export function processRemoteMonthsSnapshot(
   const updatedMonths: Record<string, MonthData> = { ...prevMonths };
   const updatedConflicts: Record<string, MonthConflictInfo> = { ...activeConflicts };
   const now = Date.now();
+
+  const pendingItems = userId ? getPendingSyncQueue(userId) : [];
+  const pendingMonthKeys = new Set(
+    pendingItems.filter(item => item.type === 'month' && item.monthKey).map(item => item.monthKey as string)
+  );
 
   for (const [mKey, remoteData] of Object.entries(remoteMonths)) {
     // Si este mes tiene un conflicto huérfano pendiente:
@@ -424,11 +430,13 @@ export function processRemoteMonthsSnapshot(
       continue;
     }
 
-    // 1. Filter remote fixed expenses against active deletion tombstones (15-second grace period)
+    const isMonthInQueue = pendingMonthKeys.has(mKey);
+
+    // 1. Filter remote fixed expenses against active deletion tombstones (60-second grace period)
     const cleanRemoteFixed = (remoteData.fixedExpenses || []).filter(e => {
       const deletedAt = deletedFixedIds.get(e.id);
       if (!deletedAt) return true;
-      if (now - deletedAt < 15000) return false;
+      if (now - deletedAt < 60000) return false;
       deletedFixedIds.delete(e.id);
       return true;
     });
@@ -437,7 +445,7 @@ export function processRemoteMonthsSnapshot(
     const cleanRemoteVar = (remoteData.variableExpenses || []).filter(e => {
       const deletedAt = deletedExpenseIds.get(e.id);
       if (!deletedAt) return true;
-      if (now - deletedAt < 15000) return false;
+      if (now - deletedAt < 60000) return false;
       deletedExpenseIds.delete(e.id);
       return true;
     });
@@ -460,30 +468,33 @@ export function processRemoteMonthsSnapshot(
     // 4. Preserve any fixed expenses that were added locally and are still pending remote confirmation
     const cleanRemoteFixIds = new Set(cleanRemoteFixed.map(e => e.id));
     const pendingFixExpenses = (localData.fixedExpenses || []).filter(
-      e => pendingFixedIds.has(e.id) && !cleanRemoteFixIds.has(e.id) && !deletedFixedIds.has(e.id)
+      e => (pendingFixedIds.has(e.id) || isMonthInQueue) && !cleanRemoteFixIds.has(e.id) && !deletedFixedIds.has(e.id)
     );
     cleanRemoteFixed.forEach(e => pendingFixedIds.delete(e.id));
 
-    // Preserve locally modified fixed expenses whose remote confirmation hasn't caught up (15-second grace period)
+    // Preserve locally modified fixed expenses whose remote confirmation hasn't caught up (60-second grace period or queue)
     const reconciledFixed = cleanRemoteFixed.map(rExp => {
       const modifiedAt = modifiedFixedIds?.get(rExp.id);
-      if (modifiedAt && (now - modifiedAt < 15000)) {
-        const localExp = (localData.fixedExpenses || []).find(l => l.id === rExp.id);
-        if (localExp) {
-          const isRemoteUpdated =
-            rExp.name === localExp.name &&
-            Number(rExp.amount) === Number(localExp.amount) &&
-            rExp.category === localExp.category &&
-            Boolean(rExp.isPaid) === Boolean(localExp.isPaid) &&
-            (rExp.dueDate ?? null) === (localExp.dueDate ?? null);
+      const localExp = (localData.fixedExpenses || []).find(l => l.id === rExp.id);
+      if (localExp) {
+        const isRemoteUpdated =
+          rExp.name === localExp.name &&
+          Number(rExp.amount) === Number(localExp.amount) &&
+          rExp.category === localExp.category &&
+          Boolean(rExp.isPaid) === Boolean(localExp.isPaid) &&
+          (rExp.dueDate ?? null) === (localExp.dueDate ?? null);
 
-          if (isRemoteUpdated) {
-            modifiedFixedIds?.delete(rExp.id);
-            return rExp;
-          }
+        if (isRemoteUpdated) {
+          modifiedFixedIds?.delete(rExp.id);
+          return rExp;
+        }
+
+        // If month is in queue or was modified recently (within 60s), preserve local state (e.g. isPaid toggle)
+        if (isMonthInQueue || (modifiedAt && (now - modifiedAt < 60000))) {
           return localExp;
         }
-      } else if (modifiedAt) {
+      }
+      if (modifiedAt && (now - modifiedAt >= 60000) && !isMonthInQueue) {
         modifiedFixedIds?.delete(rExp.id);
       }
       return rExp;
@@ -492,7 +503,7 @@ export function processRemoteMonthsSnapshot(
     // 5. Preserve any variable expenses that were added locally and are still pending remote confirmation
     const cleanRemoteVarIds = new Set(cleanRemoteVar.map(e => e.id));
     const pendingVarExpenses = (localData.variableExpenses || []).filter(
-      e => pendingExpenseIds.has(e.id) && !cleanRemoteVarIds.has(e.id) && !deletedExpenseIds.has(e.id)
+      e => (pendingExpenseIds.has(e.id) || isMonthInQueue) && !cleanRemoteVarIds.has(e.id) && !deletedExpenseIds.has(e.id)
     );
     cleanRemoteVar.forEach(e => pendingExpenseIds.delete(e.id));
 
@@ -650,14 +661,22 @@ export async function fetchAndSyncUserData(
           if (!remoteMonth) {
             finalMonths[mKey] = localData;
           } else {
-            const remoteVarIds = new Set((remoteMonth.variableExpenses || []).map(e => e.id));
-            const remoteFixIds = new Set((remoteMonth.fixedExpenses || []).map(e => e.id));
-            const pendingVar = (localData.variableExpenses || []).filter(e => !remoteVarIds.has(e.id));
-            const pendingFix = (localData.fixedExpenses || []).filter(e => !remoteFixIds.has(e.id));
+            const localVarIds = new Set((localData.variableExpenses || []).map(e => e.id));
+            const localFixIds = new Set((localData.fixedExpenses || []).map(e => e.id));
+
+            // Variable expenses: keep all local (including new and edited), plus any remote not in local
+            const remoteOnlyVar = (remoteMonth.variableExpenses || []).filter(e => !localVarIds.has(e.id));
+            const mergedVar = [...(localData.variableExpenses || []), ...remoteOnlyVar];
+
+            // Fixed expenses: keep all local (preserves isPaid: true, amounts, new additions), plus any remote not in local
+            const remoteOnlyFix = (remoteMonth.fixedExpenses || []).filter(e => !localFixIds.has(e.id));
+            const mergedFix = [...(localData.fixedExpenses || []), ...remoteOnlyFix];
+
             finalMonths[mKey] = {
               ...remoteMonth,
-              variableExpenses: [...(remoteMonth.variableExpenses || []), ...pendingVar],
-              fixedExpenses: [...(remoteMonth.fixedExpenses || []), ...pendingFix],
+              ...localData,
+              variableExpenses: mergedVar,
+              fixedExpenses: mergedFix,
             };
           }
         } else if (!remoteMonth) {
@@ -770,17 +789,38 @@ export async function fetchAndSyncUserData(
     };
   }
 
-  // Case B: Completely new user in Cloud -> Must start completely FRESH and clean at 0.
-  // NEVER automatically import or migrate generic/foreign local data into a new account.
-  const finalCategories = DEFAULT_CATEGORIES.map(c => ({ ...c }));
+  // Case B: Completely new user in Cloud OR initial upload pending.
+  // Check if this user already has local user data or pending sync items on this device.
+  const hasLocalUserData = Boolean(
+    localBudgetState.monthsData &&
+    Object.keys(localBudgetState.monthsData).length > 0 &&
+    Object.values(localBudgetState.monthsData).some(m =>
+      (m.variableExpenses && m.variableExpenses.length > 0) ||
+      (m.fixedExpenses && m.fixedExpenses.length > 0) ||
+      (m.income && m.income > 0)
+    )
+  );
+
   const now = new Date();
   const currentOngoingYear = now.getFullYear();
   const currentOngoingMonth = now.getMonth();
   const currentOngoingKey = getMonthKey(currentOngoingYear, currentOngoingMonth);
-  const cleanInitialMonth = createFreshMonthData(finalCategories);
-  const finalMonths: Record<string, MonthData> = {
-    [currentOngoingKey]: cleanInitialMonth,
-  };
+
+  let finalCategories = DEFAULT_CATEGORIES.map(c => ({ ...c }));
+  let finalMonths: Record<string, MonthData>;
+
+  if (hasLocalUserData || pendingItems.length > 0) {
+    // Preserve local user data that was created on this device (e.g. while offline or pending initial upload)
+    finalMonths = localBudgetState.monthsData || { [currentOngoingKey]: createFreshMonthData(finalCategories) };
+    if (localBudgetState.monthsData && Object.values(localBudgetState.monthsData)[0]?.categories?.length) {
+      finalCategories = Object.values(localBudgetState.monthsData)[0].categories;
+    }
+  } else {
+    // Fresh new user without any existing local data starting at 0
+    finalMonths = {
+      [currentOngoingKey]: createFreshMonthData(finalCategories),
+    };
+  }
 
   try {
     await setDoc(userDocRef, cleanForFirestore({
@@ -788,7 +828,7 @@ export async function fetchAndSyncUserData(
       email: userMeta?.email || null,
       displayName: userMeta?.displayName || null,
       photoURL: userMeta?.photoURL || null,
-      currency: 'ARS',
+      currency: localBudgetState.currency || 'ARS',
       updatedAt: nowIso,
     }));
   } catch (error) {
@@ -805,32 +845,45 @@ export async function fetchAndSyncUserData(
     handleFirestoreError(error, OperationType.CREATE, `users/${userId}/categories/global`);
   }
 
-  try {
-    const payload = cleanForFirestore({
-      userId,
-      monthKey: currentOngoingKey,
-      year: currentOngoingYear,
-      month: currentOngoingMonth,
-      income: 0,
-      savingsRate: 0,
-      extraDaysPosition: 'end',
-      categories: finalCategories.map(cleanCategory),
-      fixedExpenses: [],
-      variableExpenses: [],
-      jarAdjustments: {},
-      lastJarAdjustmentLog: null,
-      updatedAt: nowIso,
-    });
-    await setDoc(doc(db, 'users', userId, 'months', currentOngoingKey), payload);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `users/${userId}/months/${currentOngoingKey}`);
+  for (const [mKey, mData] of Object.entries(finalMonths)) {
+    const [yStr, moStr] = mKey.split('-');
+    const mYear = parseInt(yStr, 10) || currentOngoingYear;
+    const mMonth = (parseInt(moStr, 10) - 1) || currentOngoingMonth;
+    try {
+      const payload = cleanForFirestore({
+        userId,
+        monthKey: mKey,
+        year: mYear,
+        month: mMonth,
+        income: Number(mData.income) || 0,
+        savingsRate: Number(mData.savingsRate) || 0,
+        extraDaysPosition: mData.extraDaysPosition === 'start' ? 'start' : 'end',
+        categories: (mData.categories || finalCategories).map(cleanCategory),
+        fixedExpenses: (mData.fixedExpenses || []).map(cleanFixedExpense),
+        variableExpenses: (mData.variableExpenses || []).map(cleanVariableExpense),
+        jarAdjustments: mData.jarAdjustments || {},
+        lastJarAdjustmentLog: mData.lastJarAdjustmentLog ? cleanForFirestore(mData.lastJarAdjustmentLog) : null,
+        updatedAt: nowIso,
+      });
+      await setDoc(doc(db, 'users', userId, 'months', mKey), payload);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `users/${userId}/months/${mKey}`);
+    }
   }
 
-  // Save isolated local cache for this new user starting at 0
+  if (pendingItems.length > 0) {
+    setTimeout(() => {
+      processPendingSyncQueue(userId).catch(err => {
+        console.warn('Initial pending sync flush error:', err);
+      });
+    }, 500);
+  }
+
+  // Save isolated local cache for this user
   const budgetSaved = saveBudgetState({
     month: currentOngoingMonth,
     year: currentOngoingYear,
-    currency: 'ARS',
+    currency: localBudgetState.currency || 'ARS',
     monthsData: finalMonths,
   }, userId, false);
   saveGlobalCategories(finalCategories, userId, false);
@@ -839,7 +892,7 @@ export async function fetchAndSyncUserData(
   return {
     months: finalMonths,
     categories: finalCategories,
-    currency: 'ARS',
+    currency: localBudgetState.currency || 'ARS',
     source: 'cloud',
     storageFailed: !budgetSaved || !conflictsSaved,
   };

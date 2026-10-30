@@ -80,6 +80,20 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
+function getStoredUserId(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = localStorage.getItem('nita_cached_user');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.uid) return parsed.uid;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
 function MainApp() {
   // Authentication & Multi-user state (supports logged in user & guest mode without account)
   const { user, loading: isAuthLoading, isGuestMode, isOnline, isOfflineSession, isFirebaseAuthActive } = useAuth();
@@ -143,7 +157,10 @@ function MainApp() {
   };
 
   // Load state strictly isolated for current identity (authenticated user or guest)
-  const [initialData] = useState(() => loadBudgetState(user?.uid, isGuestMode));
+  const [initialData] = useState(() => {
+    const effectiveUid = user?.uid || (!isGuestMode ? getStoredUserId() : undefined);
+    return loadBudgetState(effectiveUid, isGuestMode);
+  });
 
   const [month, setMonth] = useState<number>(initialData.month);
   const [year, setYear] = useState<number>(initialData.year);
@@ -276,6 +293,32 @@ function MainApp() {
   const syncStatusRef = useRef(syncStatus);
   syncStatusRef.current = syncStatus;
 
+  // Hydrate local state when user UID is resolved if current state is blank and user cache exists
+  useEffect(() => {
+    if (user?.uid && !isGuestMode) {
+      const stored = loadBudgetState(user.uid, false);
+      if (stored && stored.monthsData && Object.keys(stored.monthsData).length > 0) {
+        setMonthsData(prev => {
+          const hasStoredContent = Object.values(stored.monthsData).some(
+            m => (m.variableExpenses && m.variableExpenses.length > 0) ||
+                 (m.fixedExpenses && m.fixedExpenses.length > 0) ||
+                 (m.income && m.income > 0)
+          );
+          const hasCurrentContent = Object.values(prev).some(
+            m => (m.variableExpenses && m.variableExpenses.length > 0) ||
+                 (m.fixedExpenses && m.fixedExpenses.length > 0) ||
+                 (m.income && m.income > 0)
+          );
+          if (hasStoredContent && !hasCurrentContent) {
+            latestMonthsDataRef.current = stored.monthsData;
+            return stored.monthsData;
+          }
+          return prev;
+        });
+      }
+    }
+  }, [user?.uid, isGuestMode]);
+
   // Sincronización con Google Firestore y cola de reintento:
   // Si la sincronización con Google falla o la conexión se interrumpe, se guarda
   // inmediatamente en cola local y se reintenta sincronizar automáticamente cada 5 segundos.
@@ -335,7 +378,8 @@ function MainApp() {
             pendingFixedIdsRef.current,
             deletedExpenseIdsRef.current,
             deletedFixedIdsRef.current,
-            modifiedFixedIdsRef.current
+            modifiedFixedIdsRef.current,
+            user.uid
           );
           unresolvedConflictsRef.current = updatedConflicts;
           setActiveConflicts(updatedConflicts);
@@ -416,7 +460,8 @@ function MainApp() {
           pendingFixedIdsRef.current,
           deletedExpenseIdsRef.current,
           deletedFixedIdsRef.current,
-          modifiedFixedIdsRef.current
+          modifiedFixedIdsRef.current,
+          user.uid
         );
 
         unresolvedConflictsRef.current = updatedConflicts;
@@ -522,6 +567,11 @@ function MainApp() {
       return;
     }
 
+    // Do NOT overwrite user's persistent local cache with uninitialized state while cloud sync is pending
+    if (user && !isCloudSyncReady) {
+      return;
+    }
+
     // Immediately back up to localStorage without delay.
     // Guarantees that local information is 100% saved even if the phone screen locks or tab unloads.
     saveBudgetState({
@@ -530,7 +580,7 @@ function MainApp() {
       currency,
       monthsData,
     }, user?.uid, isGuestMode);
-  }, [month, year, currency, monthsData, user?.uid, isGuestMode]);
+  }, [month, year, currency, monthsData, user?.uid, isGuestMode, isCloudSyncReady]);
 
   // Centralized atomic month data mutator using latest mutable ref to eliminate closure overwrites
   const mutateMonthData = useCallback((
