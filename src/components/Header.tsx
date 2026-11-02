@@ -49,6 +49,8 @@ interface HeaderProps {
   nextMonthExpenses?: FixedExpense[];
   nextMonthYear?: number;
   nextMonth?: number;
+  onManualSync?: () => Promise<void> | void;
+  isSyncingManual?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -82,6 +84,8 @@ export const Header: React.FC<HeaderProps> = ({
   nextMonthExpenses,
   nextMonthYear,
   nextMonth,
+  onManualSync,
+  isSyncingManual = false,
 }) => {
   const { user, isFirebaseAuthActive, isOnline, isOfflineSession, signInWithGoogle } = useAuth();
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
@@ -240,19 +244,26 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               </div>
             ) : user && (
-              <div 
-                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100/90 dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/80 text-3xs font-extrabold transition-all shadow-2xs select-none"
+              <button 
+                type="button"
+                onClick={() => {
+                  if (onManualSync) {
+                    onManualSync();
+                  }
+                }}
+                disabled={isSyncingManual}
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100/90 hover:bg-slate-200/90 dark:bg-slate-800/90 dark:hover:bg-slate-700/90 border border-slate-200/90 dark:border-slate-700/80 text-3xs font-extrabold transition-all shadow-2xs cursor-pointer active:scale-95 disabled:opacity-60"
                 title={
-                  syncStatus === 'syncing'
+                  isSyncingManual || syncStatus === 'syncing'
                     ? 'Sincronizando con Google en este momento...'
                     : syncStatus === 'error'
-                    ? 'En espera de conexión con Google (habitual en la ventana de simulación/iframe por bloqueo de cookies de terceros). En pestaña completa o en tu celular la sincronización es en simultáneo.'
+                    ? 'En espera de conexión con Google. Haz clic para forzar sincronización ahora.'
                     : syncStatus === 'offline'
-                    ? 'Modo sin conexión. Los cambios están guardados en este dispositivo y se sincronizarán al reconectar.'
-                    : 'Sincronización en tiempo real activa en todos tus dispositivos'
+                    ? 'Modo sin conexión. Haz clic para reintentar sincronizar.'
+                    : 'Sincronización en simultáneo activa. Haz clic para sincronizar ahora con Google.'
                 }
               >
-                {syncStatus === 'syncing' ? (
+                {isSyncingManual || syncStatus === 'syncing' ? (
                   <>
                     <Loader2 className="w-3 h-3 animate-spin text-blue-500 shrink-0" />
                     <span className="text-blue-700 dark:text-blue-300">Sincronizando...</span>
@@ -265,7 +276,7 @@ export const Header: React.FC<HeaderProps> = ({
                 ) : syncStatus === 'error' ? (
                   <>
                     <Loader2 className="w-3 h-3 animate-spin text-amber-500 shrink-0" />
-                    <span className="text-amber-700 dark:text-amber-300">En espera (Reintentando)</span>
+                    <span className="text-amber-700 dark:text-amber-300">Reintentar sinc. ↻</span>
                   </>
                 ) : (
                   <>
@@ -276,7 +287,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="text-emerald-700 dark:text-emerald-300">En simultáneo ✓</span>
                   </>
                 )}
-              </div>
+              </button>
             )}
 
             {/* In-App Notifications Bell for Due Dates (respects alertSettings) */}
@@ -315,6 +326,8 @@ export const Header: React.FC<HeaderProps> = ({
               isUpdating={isUpdating}
               lastUpdateMessage={lastUpdateMessage}
               onForceCleanReload={onForceCleanReload}
+              onManualSync={onManualSync}
+              isSyncingManual={isSyncingManual}
             />
 
           </div>

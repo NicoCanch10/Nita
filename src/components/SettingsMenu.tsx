@@ -56,6 +56,8 @@ interface SettingsMenuProps {
   isUpdating?: boolean;
   lastUpdateMessage?: string | null;
   onForceCleanReload?: () => void;
+  onManualSync?: () => Promise<void> | void;
+  isSyncingManual?: boolean;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
@@ -77,6 +79,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   isUpdating = false,
   lastUpdateMessage = null,
   onForceCleanReload,
+  onManualSync,
+  isSyncingManual = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -582,6 +586,20 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {user && onManualSync && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onManualSync();
+                    }}
+                    disabled={isSyncingManual}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-extrabold rounded-xl transition-all cursor-pointer text-2xs shadow-xs disabled:opacity-60"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingManual ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingManual ? 'Sincronizando con Google...' : 'Sincronizar datos con Google ahora'}</span>
+                  </button>
+                )}
 
                 {!isFirebaseAuthActive && (
                   <button

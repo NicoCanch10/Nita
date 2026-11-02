@@ -680,8 +680,17 @@ export async function fetchAndSyncUserData(
             };
           }
         } else if (!remoteMonth) {
-          // Caso 2: El mes no existe en Firestore (creado localmente mientras estaba desconectado) -> Preservar localmente
+          // Caso 2: El mes no existe en Firestore (creado localmente mientras estaba desconectado) -> Preservar localmente y subir a la nube
           finalMonths[mKey] = localData;
+          const hasLocalContent = (Number(localData.income) > 0) ||
+            (localData.fixedExpenses && localData.fixedExpenses.length > 0) ||
+            (localData.variableExpenses && localData.variableExpenses.length > 0);
+          if (hasLocalContent && !pendingMonthKeys.has(mKey)) {
+            const [yStr, moStr] = mKey.split('-');
+            const mYear = parseInt(yStr, 10) || new Date().getFullYear();
+            const mMonth = (parseInt(moStr, 10) - 1) || new Date().getMonth();
+            enqueuePendingMonth(userId, mKey, mYear, mMonth, localData, generateOpId());
+          }
         } else {
           // Caso 3: No tiene operación pendiente en cola, pero existe tanto local como remoto
           const isIdentical = areMonthDataEqual(localData, remoteMonth);
@@ -690,19 +699,40 @@ export async function fetchAndSyncUserData(
             delete conflicts[mKey];
             finalMonths[mKey] = remoteMonth;
           } else {
-            // Caso 3B: Difieren sin operación pendiente (cambio huérfano o discrepancia concurrente)
-            // 1. No asumir que los datos locales son obsoletos.
-            // 2. No sobrescribir silenciosamente los datos locales con los remotos.
-            // 3. No sobrescribir automáticamente los datos remotos con los locales.
-            // 4. Preservar ambas versiones señalando conflicto.
-            conflicts[mKey] = {
-              local: localData,
-              remote: remoteMonth,
-              reason: 'orphan_local_divergence',
-              detectedAt: storedConflicts[mKey]?.detectedAt || nowIso,
-            };
-            // Se preserva localData en el estado activo del usuario para evitar pérdida de datos en pantalla
-            finalMonths[mKey] = localData;
+            const isRemoteEmpty = (!remoteMonth.income || remoteMonth.income === 0) &&
+              (!remoteMonth.fixedExpenses || remoteMonth.fixedExpenses.length === 0) &&
+              (!remoteMonth.variableExpenses || remoteMonth.variableExpenses.length === 0);
+
+            const hasLocalContent = (Number(localData.income) > 0) ||
+              (localData.fixedExpenses && localData.fixedExpenses.length > 0) ||
+              (localData.variableExpenses && localData.variableExpenses.length > 0);
+
+            if (isRemoteEmpty && hasLocalContent) {
+              // El remoto es una cáscara vacía (ej. creada al abrir por primera vez en otra pestaña o PC).
+              // Preservar los datos reales del usuario y subir a Google Firestore inmediatamente.
+              delete conflicts[mKey];
+              finalMonths[mKey] = localData;
+              if (!pendingMonthKeys.has(mKey)) {
+                const [yStr, moStr] = mKey.split('-');
+                const mYear = parseInt(yStr, 10) || new Date().getFullYear();
+                const mMonth = (parseInt(moStr, 10) - 1) || new Date().getMonth();
+                enqueuePendingMonth(userId, mKey, mYear, mMonth, localData, generateOpId());
+              }
+            } else {
+              // Caso 3B: Difieren sin operación pendiente (cambio huérfano o discrepancia concurrente)
+              // 1. No asumir que los datos locales son obsoletos.
+              // 2. No sobrescribir silenciosamente los datos locales con los remotos.
+              // 3. No sobrescribir automáticamente los datos remotos con los locales.
+              // 4. Preservar ambas versiones señalando conflicto.
+              conflicts[mKey] = {
+                local: localData,
+                remote: remoteMonth,
+                reason: 'orphan_local_divergence',
+                detectedAt: storedConflicts[mKey]?.detectedAt || nowIso,
+              };
+              // Se preserva localData en el estado activo del usuario para evitar pérdida de datos en pantalla
+              finalMonths[mKey] = localData;
+            }
           }
         }
       }
@@ -769,8 +799,9 @@ export async function fetchAndSyncUserData(
       console.warn(`[Sync] Advertencia: Fallo al persistir ${Object.keys(conflicts).length} conflictos en localStorage`);
     }
 
-    // If there were pending offline items for this user, flush queue in background
-    if (pendingItems.length > 0) {
+    // If there are pending items for this user (including newly enqueued unsynced months), flush queue in background
+    const activeQueue = getPendingSyncQueue(userId);
+    if (activeQueue.length > 0) {
       setTimeout(() => {
         processPendingSyncQueue(userId).catch(err => {
           console.warn('Initial pending sync flush error:', err);
