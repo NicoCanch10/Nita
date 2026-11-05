@@ -196,7 +196,11 @@ export const Header: React.FC<HeaderProps> = ({
                       if (msg.includes('popup-closed') || msg.includes('cancelled')) {
                         return;
                       }
-                      setConnectError('En iframes de simulación, ábrelo en pestaña nueva si el navegador bloquea la ventana emergente.');
+                      if (msg.includes('popup-blocked')) {
+                        setConnectError('El navegador bloqueó la ventana de Google. Toca "Abrir pestaña completa" para autenticarte sin restricciones.');
+                      } else {
+                        setConnectError(e?.message || 'Error al conectar con Google. Abre la app en pestaña completa para validar.');
+                      }
                     } finally {
                       setIsConnectingGoogle(false);
                     }
@@ -219,7 +223,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
 
                 {connectError && (
-                  <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-50 text-2xs space-y-2 animate-in fade-in">
+                  <div className="absolute right-0 top-full mt-2 w-72 p-3 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-50 text-2xs space-y-2 animate-in fade-in">
                     <p className="text-slate-700 dark:text-slate-300 leading-snug">
                       {connectError}
                     </p>

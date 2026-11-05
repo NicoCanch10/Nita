@@ -7,6 +7,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Validación de conexión inicial
+    match /test/connection {
+      allow read: if true;
+    }
+
     // 2. Funciones auxiliares de autenticación y validación
     function isSignedIn() {
       return request.auth != null;
@@ -21,7 +26,7 @@ service cloud.firestore {
     }
 
     function isValidTimestamp(val) {
-      return val is string && val.size() >= 10 && val.size() <= 40;
+      return val is string && val.size() >= 10 && val.size() <= 50;
     }
 
     function isValidCurrency(curr) {
@@ -32,40 +37,74 @@ service cloud.firestore {
       ];
     }
 
+    function isCoherentYear(key, y) {
+      return (y is int || y is float) && y >= 1970 && y <= 2200
+        && (
+          (key.size() >= 4 && (
+            (y == 2024 && key.matches('2024-.*')) ||
+            (y == 2025 && key.matches('2025-.*')) ||
+            (y == 2026 && key.matches('2026-.*')) ||
+            (y == 2027 && key.matches('2027-.*')) ||
+            (y == 2028 && key.matches('2028-.*')) ||
+            (y == 2029 && key.matches('2029-.*')) ||
+            (y == 2030 && key.matches('2030-.*'))
+          ))
+          || (y < 2024 || y > 2030)
+        );
+    }
+
+    function isCoherentMonth(key, m) {
+      return (m is int || m is float) && m >= 0 && m <= 12
+        && (
+          ((m == 0 || m == 1) && key.matches('.*-01')) ||
+          ((m == 1 || m == 2) && key.matches('.*-02')) ||
+          ((m == 2 || m == 3) && key.matches('.*-03')) ||
+          ((m == 3 || m == 4) && key.matches('.*-04')) ||
+          ((m == 4 || m == 5) && key.matches('.*-05')) ||
+          ((m == 5 || m == 6) && key.matches('.*-06')) ||
+          ((m == 6 || m == 7) && key.matches('.*-07')) ||
+          ((m == 7 || m == 8) && key.matches('.*-08')) ||
+          ((m == 8 || m == 9) && key.matches('.*-09')) ||
+          ((m == 9 || m == 10) && key.matches('.*-10')) ||
+          ((m == 10 || m == 11) && key.matches('.*-11')) ||
+          ((m == 11 || m == 12) && key.matches('.*-12'))
+        );
+    }
+
     function isValidCategoryItem(cat) {
       return cat is map
-        && cat.keys().hasAll(['id', 'label', 'color'])
-        && cat.keys().hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
-        && cat.id is string && cat.id.size() > 0 && cat.id.size() <= 64
-        && cat.label is string && cat.label.size() <= 100
-        && cat.color is string && cat.color.size() <= 32
-        && (!('isCustom' in cat) || cat.isCustom is bool)
-        && (!('badgeBg' in cat) || (cat.badgeBg is string && cat.badgeBg.size() <= 64))
-        && (!('badgeText' in cat) || (cat.badgeText is string && cat.badgeText.size() <= 64));
+        && (!('id' in cat) || (cat.id is string && cat.id.size() > 0 && cat.id.size() <= 64))
+        && (!('label' in cat) || (cat.label is string && cat.label.size() <= 100))
+        && (!('color' in cat) || (cat.color is string && cat.color.size() <= 32))
+        && (!('isCustom' in cat) || cat.isCustom == null || cat.isCustom is bool)
+        && (!('badgeBg' in cat) || cat.badgeBg == null || (cat.badgeBg is string && cat.badgeBg.size() <= 64))
+        && (!('badgeText' in cat) || cat.badgeText == null || (cat.badgeText is string && cat.badgeText.size() <= 64));
     }
 
     function isValidFixedExpense(exp) {
       return exp is map
-        && exp.keys().hasAll(['id', 'name', 'amount', 'category', 'isPaid'])
-        && exp.keys().hasOnly(['id', 'name', 'amount', 'category', 'isPaid', 'dueDate', 'notes'])
-        && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
-        && exp.name is string && exp.name.size() <= 150
-        && exp.amount is number && exp.amount >= 0
-        && exp.category is string && exp.category.size() <= 64
-        && exp.isPaid is bool
-        && (!('dueDate' in exp) || ((exp.dueDate is int || exp.dueDate is number) && exp.dueDate >= 1 && exp.dueDate <= 31))
-        && (!('notes' in exp) || (exp.notes is string && exp.notes.size() <= 500));
+        && (!('id' in exp) || (exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64))
+        && (!('name' in exp) || (exp.name is string && exp.name.size() <= 150))
+        && (!('amount' in exp) || ((exp.amount is int || exp.amount is float) && exp.amount >= 0))
+        && (!('category' in exp) || (exp.category is string && exp.category.size() <= 64))
+        && (!('isPaid' in exp) || exp.isPaid is bool)
+        && (!('dueDate' in exp) || exp.dueDate == null || ((exp.dueDate is int || exp.dueDate is float) && exp.dueDate >= 0 && exp.dueDate <= 31))
+        && (!('notes' in exp) || exp.notes == null || (exp.notes is string && exp.notes.size() <= 500));
     }
 
     function isValidVariableExpense(exp) {
       return exp is map
-        && exp.keys().hasAll(['id', 'date', 'description', 'amount', 'category'])
-        && exp.keys().hasOnly(['id', 'date', 'description', 'amount', 'category'])
-        && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
-        && exp.date is string && exp.date.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
-        && exp.description is string && exp.description.size() <= 200
-        && exp.amount is number && exp.amount >= 0
-        && exp.category is string && exp.category.size() <= 64;
+        && (!('id' in exp) || (exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64))
+        && (!('description' in exp) || exp.description == null || (exp.description is string && exp.description.size() <= 200))
+        && (!('amount' in exp) || ((exp.amount is int || exp.amount is float) && exp.amount >= 0))
+        && (!('category' in exp) || (exp.category is string && exp.category.size() <= 64))
+        && (!('date' in exp) || exp.date == null || (
+          exp.date is string && (
+            !exp.date.matches('.*-[0-9]{2}-[0-9]{2}')
+            || exp.date.matches('[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])')
+            || exp.date.size() >= 8
+          )
+        ));
     }
 
     function areValidCategories(cats) {
@@ -98,29 +137,28 @@ service cloud.firestore {
     function isValidJarLog(log) {
       return log == null || (
         log is map
-        && log.keys().hasOnly(['date', 'exceededJarTitle', 'diff', 'transferredToNextMonth', 'nextMonthKey'])
-        && (!('date' in log) || (log.date is string && log.date.size() <= 50))
-        && (!('exceededJarTitle' in log) || (log.exceededJarTitle is string && log.exceededJarTitle.size() <= 100))
-        && (!('diff' in log) || (log.diff is number && log.diff >= 0))
-        && (!('transferredToNextMonth' in log) || log.transferredToNextMonth is bool)
-        && (!('nextMonthKey' in log) || (log.nextMonthKey is string && log.nextMonthKey.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')))
+        && (!('date' in log) || log.date == null || (log.date is string && log.date.size() <= 50))
+        && (!('exceededJarTitle' in log) || log.exceededJarTitle == null || (log.exceededJarTitle is string && log.exceededJarTitle.size() <= 100))
+        && (!('diff' in log) || log.diff == null || (log.diff is int || log.diff is float))
+        && (!('transferredToNextMonth' in log) || log.transferredToNextMonth == null || log.transferredToNextMonth is bool)
+        && (!('nextMonthKey' in log) || log.nextMonthKey == null || (log.nextMonthKey is string && log.nextMonthKey.size() <= 20))
       );
     }
 
     // 3. Documento de perfil de usuario (/users/{userId})
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow delete: if false; // Previene borrado accidental o malicioso
+      allow delete: if false;
 
       allow create, update: if isOwner(userId)
         && incoming().uid == userId
-        && incoming().keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'currency', 'language', 'onboardingSeen', 'updatedAt'])
+        && incoming().keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'currency', 'language', 'onboardingSeen', 'updatedAt', 'createdAt', 'id'])
         && (!('currency' in incoming()) || isValidCurrency(incoming().currency))
         && (!('language' in incoming()) || (incoming().language is string && incoming().language.size() <= 10))
         && (!('onboardingSeen' in incoming()) || incoming().onboardingSeen is bool)
-        && (!('email' in incoming()) || incoming().email == null || (incoming().email is string && incoming().email.size() <= 200))
-        && (!('displayName' in incoming()) || incoming().displayName == null || (incoming().displayName is string && incoming().displayName.size() <= 150))
-        && (!('photoURL' in incoming()) || incoming().photoURL == null || (incoming().photoURL is string && incoming().photoURL.size() <= 500))
+        && (!('email' in incoming()) || incoming().email == null || (incoming().email is string && incoming().email.size() <= 320))
+        && (!('displayName' in incoming()) || incoming().displayName == null || (incoming().displayName is string && incoming().displayName.size() <= 250))
+        && (!('photoURL' in incoming()) || incoming().photoURL == null || (incoming().photoURL is string && incoming().photoURL.size() <= 2048))
         && (!('updatedAt' in incoming()) || isValidTimestamp(incoming().updatedAt));
 
       // 4. Categorías globales (/users/{userId}/categories/global)
@@ -129,9 +167,8 @@ service cloud.firestore {
         allow delete: if false;
 
         allow create, update: if isOwner(userId)
-          && docId == 'global'
+          && (docId == 'global' || docId.size() <= 64)
           && incoming().userId == userId
-          && incoming().keys().hasOnly(['userId', 'categories', 'updatedAt'])
           && areValidCategories(incoming().categories)
           && (!('updatedAt' in incoming()) || isValidTimestamp(incoming().updatedAt));
       }
@@ -142,28 +179,23 @@ service cloud.firestore {
         allow delete: if false;
 
         allow create, update: if isOwner(userId)
-          && monthKey.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
           && incoming().userId == userId
           && incoming().monthKey == monthKey
           && incoming().keys().hasOnly([
             'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
             'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses',
-            'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt'
+            'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt', 'createdAt', 'currency', 'id',
+            'syncStatus', 'isSynced'
           ])
-          // Validar coherencia temporal estricta entre monthKey, year y month
-          && (incoming().year is int || incoming().year is number) && incoming().year >= 2000 && incoming().year <= 2100
-          && (incoming().month is int || incoming().month is number) && incoming().month >= 0 && incoming().month <= 11
-          && (
-            (incoming().month < 9 && monthKey == string(incoming().year) + '-0' + string(incoming().month + 1))
-            || (incoming().month >= 9 && monthKey == string(incoming().year) + '-' + string(incoming().month + 1))
-          )
-          && incoming().income is number && incoming().income >= 0
-          && incoming().savingsRate is number && incoming().savingsRate >= 0 && incoming().savingsRate <= 100
+          && isCoherentYear(monthKey, incoming().year)
+          && isCoherentMonth(monthKey, incoming().month)
+          && (incoming().income is int || incoming().income is float) && incoming().income >= 0
+          && (incoming().savingsRate is int || incoming().savingsRate is float) && incoming().savingsRate >= 0 && incoming().savingsRate <= 100
           && incoming().extraDaysPosition in ['start', 'end']
           && areValidCategories(incoming().categories)
           && areValidFixedExpenses(incoming().fixedExpenses)
           && areValidVariableExpenses(incoming().variableExpenses)
-          && (!('jarAdjustments' in incoming()) || incoming().jarAdjustments is map)
+          && (!('jarAdjustments' in incoming()) || incoming().jarAdjustments == null || incoming().jarAdjustments is map)
           && (!('lastJarAdjustmentLog' in incoming()) || isValidJarLog(incoming().lastJarAdjustmentLog))
           && (!('updatedAt' in incoming()) || isValidTimestamp(incoming().updatedAt));
       }

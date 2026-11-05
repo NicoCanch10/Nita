@@ -8,7 +8,9 @@ import {
   linkWithPopup, 
   User,
   setPersistence,
-  browserLocalPersistence
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
@@ -48,11 +50,14 @@ let persistenceInitPromise: Promise<void> | null = null;
 
 export function ensureAuthPersistence(): Promise<void> {
   if (!persistenceInitPromise) {
-    persistenceInitPromise = setPersistence(auth, browserLocalPersistence).catch((err) => {
-      console.error('[Firebase Auth] Failed to configure browserLocalPersistence:', err);
-      // Reset promise so subsequent user attempts can retry
-      persistenceInitPromise = null;
-      throw err;
+    persistenceInitPromise = setPersistence(auth, browserLocalPersistence).catch(async (err) => {
+      console.warn('[Firebase Auth] browserLocalPersistence not available, falling back to session:', err);
+      try {
+        await setPersistence(auth, browserSessionPersistence);
+      } catch (err2) {
+        console.warn('[Firebase Auth] browserSessionPersistence not available, using in-memory:', err2);
+        await setPersistence(auth, inMemoryPersistence).catch(() => {});
+      }
     });
   }
   return persistenceInitPromise;
@@ -164,19 +169,21 @@ export async function testConnection(): Promise<void> {
 // Providers
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+googleProvider.addScope('email');
+googleProvider.addScope('profile');
 
 export const appleProvider = new OAuthProvider('apple.com');
 appleProvider.addScope('email');
 appleProvider.addScope('name');
 
 // Auth actions: synchronous user gesture execution for reliable popup authorization across all browsers
-export async function signInWithGoogle() {
-  await ensureAuthPersistence();
-  return await signInWithPopup(auth, googleProvider);
+export function signInWithGoogle() {
+  ensureAuthPersistence().catch(() => {});
+  return signInWithPopup(auth, googleProvider);
 }
 
 export async function signInWithApple() {
-  await ensureAuthPersistence();
+  ensureAuthPersistence().catch(() => {});
   return await signInWithPopup(auth, appleProvider);
 }
 

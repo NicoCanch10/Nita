@@ -58,10 +58,29 @@ export const AuthScreen: React.FC = () => {
 
         {/* Error Alert */}
         {authError && (
-          <div className="w-full mb-5 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-300 animate-in fade-in duration-200">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-            <div className="flex-1 leading-snug">
-              {authError}
+          <div className="w-full mb-5 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex flex-col gap-2 text-xs text-rose-700 dark:text-rose-300 animate-in fade-in duration-200">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+              <div className="flex-1 leading-snug">
+                {authError}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-200/60 dark:border-rose-900/40">
+              <a
+                href={typeof window !== 'undefined' ? window.location.href : '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-3xs transition-colors"
+              >
+                Abrir en pestaña nueva ↗
+              </a>
+              <button
+                type="button"
+                onClick={clearAuthError}
+                className="px-2 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-3xs font-semibold cursor-pointer"
+              >
+                Descartar
+              </button>
             </div>
           </div>
         )}

@@ -24,10 +24,15 @@ import {
   saveGlobalCategories,
   createFreshMonthData,
   getPendingSyncQueue,
+  enqueuePendingMonth,
   removePendingSyncItem,
   removePendingSyncItemIfMatch,
   removePendingMonthFromQueue,
-  hasPendingSync
+  hasPendingSync,
+  generateOpId,
+  hasRealUserContent,
+  mergeMonthData,
+  recoverLocalDataSources
 } from '../utils/storage';
 import { DEFAULT_CATEGORIES } from '../utils/currency';
 
@@ -180,25 +185,24 @@ export function cleanForFirestore<T>(data: T): T {
  */
 export function cleanFixedExpense(expense: FixedExpense | Record<string, any>): Record<string, any> {
   const item: Record<string, any> = {
-    id: String(expense.id || `f_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`),
-    name: String(expense.name || '').trim(),
-    amount: Number(expense.amount) || 0,
-    category: String(expense.category || 'other'),
+    id: String(expense.id || `f_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`).slice(0, 64),
+    name: String(expense.name || '').trim().slice(0, 150),
+    amount: Math.max(0, Number(expense.amount) || 0),
+    category: String(expense.category || 'other').slice(0, 64),
     isPaid: Boolean(expense.isPaid),
   };
 
   // Solo incluir dueDate si es un número válido entre 1 y 31; nunca enviar undefined a Google Cloud
-  if (
-    typeof expense.dueDate === 'number' &&
-    !isNaN(expense.dueDate) &&
-    expense.dueDate >= 1 &&
-    expense.dueDate <= 31
-  ) {
-    item.dueDate = Math.round(expense.dueDate);
+  const parsedDue = typeof expense.dueDate === 'number'
+    ? expense.dueDate
+    : (expense.dueDate ? parseInt(String(expense.dueDate), 10) : NaN);
+
+  if (!isNaN(parsedDue) && parsedDue >= 1 && parsedDue <= 31) {
+    item.dueDate = Math.round(parsedDue);
   }
 
   if (typeof expense.notes === 'string' && expense.notes.trim()) {
-    item.notes = expense.notes.trim();
+    item.notes = expense.notes.trim().slice(0, 500);
   }
 
   return item;
@@ -218,7 +222,7 @@ export function cleanVariableExpense(expense: VariableExpense | Record<string, a
   return {
     id: String(expense.id || `v_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`).slice(0, 64),
     date: cleanDate,
-    description: String(expense.description || '').trim().slice(0, 200),
+    description: String(expense.description || (expense as any).name || '').trim().slice(0, 200),
     amount: Math.max(0, Number(expense.amount) || 0),
     category: String(expense.category || 'other').slice(0, 64),
   };
@@ -226,18 +230,18 @@ export function cleanVariableExpense(expense: VariableExpense | Record<string, a
 
 export function cleanCategory(cat: CategoryInfo | Record<string, any>): CategoryInfo {
   const item: CategoryInfo = {
-    id: String(cat.id),
-    label: String(cat.label || ''),
-    color: String(cat.color || '#6366f1'),
+    id: String(cat.id || `c_${Math.random().toString(36).substr(2, 5)}`).slice(0, 64),
+    label: String(cat.label || cat.id || 'Categoría').slice(0, 100),
+    color: String(cat.color || '#6366f1').slice(0, 32),
   };
   if (typeof cat.isCustom === 'boolean') {
     item.isCustom = cat.isCustom;
   }
   if (cat.badgeBg) {
-    item.badgeBg = String(cat.badgeBg);
+    item.badgeBg = String(cat.badgeBg).slice(0, 64);
   }
   if (cat.badgeText) {
-    item.badgeText = String(cat.badgeText);
+    item.badgeText = String(cat.badgeText).slice(0, 64);
   }
   return item;
 }
@@ -412,6 +416,19 @@ export function processRemoteMonthsSnapshot(
   for (const [mKey, remoteData] of Object.entries(remoteMonths)) {
     // Si este mes tiene un conflicto huérfano pendiente:
     if (updatedConflicts[mKey]) {
+      // Si la versión local registrada en el descriptor carece de contenido real del usuario
+      // (plantilla vacía con 0 ingresos y sin gastos), no constituye un conflicto genuino.
+      const localConflict = updatedConflicts[mKey].local;
+      const hasConflictLocal = (Number(localConflict?.income) > 0) ||
+        Boolean(localConflict?.fixedExpenses && localConflict.fixedExpenses.length > 0) ||
+        Boolean(localConflict?.variableExpenses && localConflict.variableExpenses.length > 0);
+
+      if (!hasConflictLocal) {
+        delete updatedConflicts[mKey];
+        updatedMonths[mKey] = remoteData;
+        continue;
+      }
+
       // 1. Conservar intacto el mes local protegido
       updatedMonths[mKey] = prevMonths[mKey] || remoteData;
       // 2. Mantener la versión remota actualizada en el descriptor para permitir resolución informada
@@ -507,8 +524,18 @@ export function processRemoteMonthsSnapshot(
     );
     cleanRemoteVar.forEach(e => pendingExpenseIds.delete(e.id));
 
+    const effectiveIncome = Number(remoteData.income) > 0 
+      ? Number(remoteData.income) 
+      : (Number(localData.income) > 0 ? Number(localData.income) : 0);
+
+    const effectiveSavingsRate = Number(remoteData.savingsRate) > 0
+      ? Number(remoteData.savingsRate)
+      : (Number(localData.savingsRate) > 0 ? Number(localData.savingsRate) : 0);
+
     updatedMonths[mKey] = {
       ...remoteData,
+      income: effectiveIncome,
+      savingsRate: effectiveSavingsRate,
       variableExpenses: [...cleanRemoteVar, ...pendingVarExpenses],
       fixedExpenses: [...reconciledFixed, ...pendingFixExpenses],
     };
@@ -687,8 +714,10 @@ export async function fetchAndSyncUserData(
             (localData.variableExpenses && localData.variableExpenses.length > 0);
           if (hasLocalContent && !pendingMonthKeys.has(mKey)) {
             const [yStr, moStr] = mKey.split('-');
-            const mYear = parseInt(yStr, 10) || new Date().getFullYear();
-            const mMonth = (parseInt(moStr, 10) - 1) || new Date().getMonth();
+            const parsedY = parseInt(yStr, 10);
+            const parsedM = parseInt(moStr, 10) - 1;
+            const mYear = !isNaN(parsedY) ? parsedY : new Date().getFullYear();
+            const mMonth = !isNaN(parsedM) ? parsedM : new Date().getMonth();
             enqueuePendingMonth(userId, mKey, mYear, mMonth, localData, generateOpId());
           }
         } else {
@@ -699,13 +728,8 @@ export async function fetchAndSyncUserData(
             delete conflicts[mKey];
             finalMonths[mKey] = remoteMonth;
           } else {
-            const isRemoteEmpty = (!remoteMonth.income || remoteMonth.income === 0) &&
-              (!remoteMonth.fixedExpenses || remoteMonth.fixedExpenses.length === 0) &&
-              (!remoteMonth.variableExpenses || remoteMonth.variableExpenses.length === 0);
-
-            const hasLocalContent = (Number(localData.income) > 0) ||
-              (localData.fixedExpenses && localData.fixedExpenses.length > 0) ||
-              (localData.variableExpenses && localData.variableExpenses.length > 0);
+            const isRemoteEmpty = !hasRealUserContent(remoteMonth);
+            const hasLocalContent = hasRealUserContent(localData);
 
             if (isRemoteEmpty && hasLocalContent) {
               // El remoto es una cáscara vacía (ej. creada al abrir por primera vez en otra pestaña o PC).
@@ -714,10 +738,17 @@ export async function fetchAndSyncUserData(
               finalMonths[mKey] = localData;
               if (!pendingMonthKeys.has(mKey)) {
                 const [yStr, moStr] = mKey.split('-');
-                const mYear = parseInt(yStr, 10) || new Date().getFullYear();
-                const mMonth = (parseInt(moStr, 10) - 1) || new Date().getMonth();
+                const parsedY = parseInt(yStr, 10);
+                const parsedM = parseInt(moStr, 10) - 1;
+                const mYear = !isNaN(parsedY) ? parsedY : new Date().getFullYear();
+                const mMonth = !isNaN(parsedM) ? parsedM : new Date().getMonth();
                 enqueuePendingMonth(userId, mKey, mYear, mMonth, localData, generateOpId());
               }
+            } else if (!hasLocalContent) {
+              // El local es solo una plantilla vacía (este dispositivo aún no tenía datos o recién inicia sesión).
+              // Adoptar directamente los datos remotos de Google Cloud sin generar falsos conflictos.
+              delete conflicts[mKey];
+              finalMonths[mKey] = remoteMonth;
             } else {
               // Caso 3B: Difieren sin operación pendiente (cambio huérfano o discrepancia concurrente)
               // 1. No asumir que los datos locales son obsoletos.
@@ -878,8 +909,10 @@ export async function fetchAndSyncUserData(
 
   for (const [mKey, mData] of Object.entries(finalMonths)) {
     const [yStr, moStr] = mKey.split('-');
-    const mYear = parseInt(yStr, 10) || currentOngoingYear;
-    const mMonth = (parseInt(moStr, 10) - 1) || currentOngoingMonth;
+    const parsedY = parseInt(yStr, 10);
+    const parsedM = parseInt(moStr, 10) - 1;
+    const mYear = !isNaN(parsedY) ? parsedY : currentOngoingYear;
+    const mMonth = !isNaN(parsedM) ? parsedM : currentOngoingMonth;
     try {
       const payload = cleanForFirestore({
         userId,
@@ -975,16 +1008,22 @@ export async function saveMonthToFirestore(
 ): Promise<void> {
   const path = `users/${userId}/months/${monthKey}`;
   try {
+    const [keyYearStr, keyMonthStr] = monthKey.split('-');
+    const derivedYear = parseInt(keyYearStr, 10);
+    const derivedMonth = parseInt(keyMonthStr, 10) - 1;
+    const effectiveYear = !isNaN(derivedYear) ? derivedYear : year;
+    const effectiveMonth = !isNaN(derivedMonth) ? derivedMonth : month;
+
     const monthDocRef = doc(db, 'users', userId, 'months', monthKey);
     const payload = cleanForFirestore({
       userId,
       monthKey,
-      year,
-      month,
+      year: effectiveYear,
+      month: effectiveMonth,
       income: Number(data.income) || 0,
       savingsRate: Number(data.savingsRate) || 0,
       extraDaysPosition: data.extraDaysPosition === 'start' ? 'start' : 'end',
-      categories: (data.categories || []).map(cleanCategory),
+      categories: (data.categories && data.categories.length > 0 ? data.categories : DEFAULT_CATEGORIES).map(cleanCategory),
       fixedExpenses: (data.fixedExpenses || []).map(cleanFixedExpense),
       variableExpenses: (data.variableExpenses || []).map(cleanVariableExpense),
       jarAdjustments: data.jarAdjustments || {},
@@ -1228,7 +1267,7 @@ export async function processPendingSyncQueue(
     return { syncedCount: 0, remainingCount: q.length };
   }
 
-  if (typeof window !== 'undefined' && auth.currentUser && auth.currentUser.uid !== userId) {
+  if (!auth.currentUser || auth.currentUser.uid !== userId) {
     const q = getPendingSyncQueue(userId);
     return { syncedCount: 0, remainingCount: q.length };
   }
@@ -1314,6 +1353,45 @@ export function subscribeToUserMonths(
     },
     (error) => {
       handleFirestoreError(error, OperationType.LIST, colPath);
+    }
+  );
+}
+
+/**
+ * Sets up real-time listener for a single month document (/users/{userId}/months/{monthKey}).
+ * Guarantees zero memory leaks with the returned Unsubscribe cleanup function.
+ */
+export function subscribeToUserMonth(
+  userId: string,
+  monthKey: string,
+  onMonthUpdate: (monthData: MonthData | null, hasPendingWrites: boolean) => void
+): Unsubscribe {
+  const docPath = `users/${userId}/months/${monthKey}`;
+  const docRef = doc(db, 'users', userId, 'months', monthKey);
+
+  return onSnapshot(
+    docRef,
+    { includeMetadataChanges: true },
+    (docSnap) => {
+      const hasPendingWrites = docSnap.metadata.hasPendingWrites;
+      if (!docSnap.exists()) {
+        onMonthUpdate(null, hasPendingWrites);
+        return;
+      }
+      const d = docSnap.data() as UserMonthDoc;
+      onMonthUpdate({
+        income: Number(d.income) || 0,
+        savingsRate: Number(d.savingsRate) || 0,
+        extraDaysPosition: d.extraDaysPosition ?? 'end',
+        categories: parseCategories(d.categories),
+        fixedExpenses: parseFixedExpenses(d.fixedExpenses),
+        variableExpenses: parseVariableExpenses(d.variableExpenses),
+        jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
+        lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
+      }, hasPendingWrites);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, docPath);
     }
   );
 }

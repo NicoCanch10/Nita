@@ -497,3 +497,193 @@ export function exportToCSV(
   link.click();
   document.body.removeChild(link);
 }
+
+/**
+ * Detects whether a MonthData record contains genuine user-entered content
+ * (positive income, expenses with amount/description, paid status, or jar adjustments).
+ * Returns false for blank/template months initialized with 0s.
+ */
+export function hasRealUserContent(data?: MonthData | null): boolean {
+  if (!data) return false;
+  if (Number(data.income) > 0) return true;
+  if (data.variableExpenses && data.variableExpenses.length > 0) {
+    if (data.variableExpenses.some(v => Number(v.amount) > 0 || (v.description && v.description.trim().length > 0))) {
+      return true;
+    }
+  }
+  if (data.fixedExpenses && data.fixedExpenses.length > 0) {
+    if (data.fixedExpenses.some(f => Number(f.amount) > 0 || f.isPaid || (f.notes && f.notes.trim().length > 0))) {
+      return true;
+    }
+    const defaultIds = new Set(['f_rent', 'f_electricity', 'f_water', 'f_internet', 'f_gas', 'f_phone', 'f_insurance', 'f_other']);
+    if (data.fixedExpenses.some(f => !defaultIds.has(f.id))) {
+      return true;
+    }
+  }
+  if (data.jarAdjustments && Object.values(data.jarAdjustments).some(v => Number(v) !== 0)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Intelligently fuses two MonthData objects without loss:
+ * - Unites fixed expenses by ID (preferring paid status, non-zero amount, and modified values)
+ * - Unites variable expenses by ID (preserving every unique expense from both devices)
+ * - Retains active income and savings rate
+ * - Merges categories and jar adjustments
+ */
+export function mergeMonthData(target?: MonthData | null, source?: MonthData | null): MonthData {
+  if (!target && !source) return createFreshMonthData();
+  if (!target) return source!;
+  if (!source) return target;
+
+  const income = Number(target.income) > 0 ? Number(target.income) : (Number(source.income) || 0);
+  const savingsRate = Number(target.savingsRate) > 0 ? Number(target.savingsRate) : (Number(source.savingsRate) || 0);
+  const extraDaysPosition = target.extraDaysPosition || source.extraDaysPosition || 'end';
+
+  // Fixed expenses: union by ID with non-destructive attribute merge
+  const fixedMap = new Map<string, FixedExpense>();
+  (source.fixedExpenses || []).forEach(f => {
+    if (f && f.id) fixedMap.set(f.id, { ...f });
+  });
+  (target.fixedExpenses || []).forEach(f => {
+    if (f && f.id) {
+      const existing = fixedMap.get(f.id);
+      if (!existing) {
+        fixedMap.set(f.id, { ...f });
+      } else {
+        fixedMap.set(f.id, {
+          ...existing,
+          ...f,
+          name: f.name?.trim() ? f.name : existing.name,
+          amount: Number(f.amount) > 0 ? Number(f.amount) : existing.amount,
+          category: f.category || existing.category,
+          isPaid: Boolean(f.isPaid || existing.isPaid),
+          dueDate: f.dueDate ?? existing.dueDate,
+          notes: f.notes || existing.notes,
+        });
+      }
+    }
+  });
+
+  // Variable expenses: union by ID preserving all unique entries
+  const varMap = new Map<string, VariableExpense>();
+  (source.variableExpenses || []).forEach(v => {
+    if (v && v.id) varMap.set(v.id, { ...v });
+  });
+  (target.variableExpenses || []).forEach(v => {
+    if (v && v.id) {
+      const existing = varMap.get(v.id);
+      if (!existing) {
+        varMap.set(v.id, { ...v });
+      } else {
+        varMap.set(v.id, {
+          ...existing,
+          ...v,
+          description: v.description?.trim() ? v.description : existing.description,
+          amount: Number(v.amount) > 0 ? Number(v.amount) : existing.amount,
+          category: v.category || existing.category,
+        });
+      }
+    }
+  });
+
+  // Categories: union by ID
+  const catMap = new Map<string, CategoryInfo>();
+  (source.categories || []).forEach(c => {
+    if (c && c.id) catMap.set(c.id, { ...c });
+  });
+  (target.categories || []).forEach(c => {
+    if (c && c.id) catMap.set(c.id, { ...c });
+  });
+
+  const jarAdjustments = {
+    ...(source.jarAdjustments || {}),
+    ...(target.jarAdjustments || {}),
+  };
+
+  const lastJarAdjustmentLog = target.lastJarAdjustmentLog ?? source.lastJarAdjustmentLog;
+
+  return {
+    income,
+    savingsRate,
+    extraDaysPosition,
+    categories: Array.from(catMap.values()),
+    fixedExpenses: Array.from(fixedMap.values()),
+    variableExpenses: Array.from(varMap.values()),
+    jarAdjustments: Object.keys(jarAdjustments).length > 0 ? jarAdjustments : undefined,
+    lastJarAdjustmentLog: lastJarAdjustmentLog ?? undefined,
+  };
+}
+
+/**
+ * Scans all persistent local storage keys (user cache, sync queue, conflicts, guest, legacy)
+ * to recover any expenses or income entered by this user on this device.
+ */
+export function recoverLocalDataSources(userId?: string | null): Record<string, MonthData> {
+  const recovered: Record<string, MonthData> = {};
+  if (!userId || typeof localStorage === 'undefined') return recovered;
+
+  const tryMergeCandidate = (candidateMap?: Record<string, MonthData> | null) => {
+    if (!candidateMap || typeof candidateMap !== 'object') return;
+    for (const [mKey, mData] of Object.entries(candidateMap)) {
+      if (mData && typeof mData === 'object') {
+        const hasContent = (Number(mData.income) > 0) ||
+          (Array.isArray(mData.fixedExpenses) && mData.fixedExpenses.length > 0) ||
+          (Array.isArray(mData.variableExpenses) && mData.variableExpenses.length > 0);
+        if (hasContent) {
+          recovered[mKey] = recovered[mKey] ? mergeMonthData(recovered[mKey], mData) : mData;
+        }
+      }
+    }
+  };
+
+  try {
+    // 1. Current user isolated cache
+    const userRaw = localStorage.getItem(getUserStorageKey(userId));
+    if (userRaw) {
+      const parsed = JSON.parse(userRaw);
+      tryMergeCandidate(parsed?.monthsData);
+    }
+
+    // 2. Pending sync queue items for this user
+    const queue = getPendingSyncQueue(userId);
+    for (const item of queue) {
+      if (item.type === 'month' && item.monthKey && item.data) {
+        tryMergeCandidate({ [item.monthKey]: item.data });
+      }
+    }
+
+    // 3. Persisted conflicts descriptor
+    const conflictsRaw = localStorage.getItem(`nita_user_conflicts_${userId}`);
+    if (conflictsRaw) {
+      const parsed = JSON.parse(conflictsRaw);
+      if (parsed && typeof parsed === 'object') {
+        for (const [mKey, c] of Object.entries(parsed as Record<string, any>)) {
+          if (c?.local) tryMergeCandidate({ [mKey]: c.local });
+          if (c?.remote) tryMergeCandidate({ [mKey]: c.remote });
+        }
+      }
+    }
+
+    // 4. Guest storage (if data was entered before logging in with Google on this device)
+    const guestRaw = localStorage.getItem(GUEST_STORAGE_KEY);
+    if (guestRaw) {
+      const parsed = JSON.parse(guestRaw);
+      tryMergeCandidate(parsed?.monthsData);
+    }
+
+    // 5. Legacy storage
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      const parsed = JSON.parse(legacyRaw);
+      tryMergeCandidate(parsed?.monthsData);
+    }
+  } catch (e) {
+    console.warn('[Storage] Error during multi-source recovery:', e);
+  }
+
+  return recovered;
+}
+
