@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'path';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { APP_VERSION, getNextAppVersion } from './src/utils/version';
+import { APP_VERSION, getNextAppVersion } from './src/utils/version.ts';
 
 const BUILD_ID = Date.now().toString();
 const BUILD_TIME = new Date().toISOString();

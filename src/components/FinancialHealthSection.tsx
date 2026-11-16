@@ -105,9 +105,6 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white truncate">
                 {t.healthTitle}
               </h2>
-              <span className="text-2xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-900 hidden sm:inline-block">
-                {t.optionalTag}
-              </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
               {t.rule503020Summary}
@@ -117,7 +114,7 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
 
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hidden sm:inline">
-            {isExpanded ? t.toggleJarsMobileCollapse : t.toggleJarsMobileExpand}
+            {isExpanded ? 'Contraer' : 'Desplegar'}
           </span>
           <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
