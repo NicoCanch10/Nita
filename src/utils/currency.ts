@@ -28,7 +28,7 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyConfig> = {
 
 export const DEFAULT_CATEGORIES: CategoryInfo[] = [
   { id: 'housing', label: 'Vivienda y Alquiler', color: '#4f46e5' },
-  { id: 'services', label: 'Servicios (Luz, Gas, Agua)', color: '#0284c7' },
+  { id: 'services', label: 'Servicios', color: '#0284c7' },
   { id: 'debt', label: 'Tarjetas y Deudas', color: '#e11d48' },
   { id: 'food', label: 'Alimentación y Supermercado', color: '#16a34a' },
   { id: 'transport', label: 'Transporte y Combustible', color: '#d97706' },
@@ -126,6 +126,25 @@ export const DEFAULT_CATEGORY_TRANSLATIONS: Record<string, Record<string, string
   },
 };
 
+const LEGACY_DEFAULT_CATEGORY_LABELS: Record<string, { legacy: string[]; next: string }> = {
+  services: {
+    legacy: ['Servicios (Luz, Gas, Agua)'],
+    next: 'Servicios',
+  },
+};
+
+export function normalizeDefaultCategoryLabel(cat: CategoryInfo): CategoryInfo {
+  const mapping = LEGACY_DEFAULT_CATEGORY_LABELS[cat.id];
+  if (mapping && mapping.legacy.includes(String(cat.label || '').trim())) {
+    return { ...cat, label: mapping.next };
+  }
+  return cat;
+}
+
+export function normalizeDefaultCategories(categories: CategoryInfo[]): CategoryInfo[] {
+  return categories.map(normalizeDefaultCategoryLabel);
+}
+
 export function getCategoryInfo(
   id: string, 
   customCategories?: CategoryInfo[], 
@@ -156,6 +175,8 @@ export function getCategoryInfo(
       isCustom: true,
     };
   }
+
+  base = normalizeDefaultCategoryLabel(base);
 
   // If not custom and a translation is available for the given language, translate label
   if (!base.isCustom && language && language !== 'es') {

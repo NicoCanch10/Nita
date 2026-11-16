@@ -34,7 +34,7 @@ import {
   mergeMonthData,
   recoverLocalDataSources
 } from '../utils/storage';
-import { DEFAULT_CATEGORIES } from '../utils/currency';
+import { DEFAULT_CATEGORIES, normalizeDefaultCategoryLabel } from '../utils/currency';
 
 export interface UserProfileDoc {
   uid: string;
@@ -229,10 +229,15 @@ export function cleanVariableExpense(expense: VariableExpense | Record<string, a
 }
 
 export function cleanCategory(cat: CategoryInfo | Record<string, any>): CategoryInfo {
-  const item: CategoryInfo = {
+  const normalized = normalizeDefaultCategoryLabel({
     id: String(cat.id || `c_${Math.random().toString(36).substr(2, 5)}`).slice(0, 64),
     label: String(cat.label || cat.id || 'Categoría').slice(0, 100),
     color: String(cat.color || '#6366f1').slice(0, 32),
+  });
+  const item: CategoryInfo = {
+    id: normalized.id,
+    label: normalized.label,
+    color: normalized.color,
   };
   if (typeof cat.isCustom === 'boolean') {
     item.isCustom = cat.isCustom;
@@ -274,14 +279,16 @@ export function parseVariableExpenses(raw: unknown): VariableExpense[] {
 
 export function parseCategories(raw: unknown): CategoryInfo[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map((c: any) => ({
-    id: String(c.id),
-    label: String(c.label || ''),
-    color: String(c.color || '#6366f1'),
-    ...(typeof c.isCustom === 'boolean' ? { isCustom: c.isCustom } : {}),
-    ...(c.badgeBg ? { badgeBg: String(c.badgeBg) } : {}),
-    ...(c.badgeText ? { badgeText: String(c.badgeText) } : {}),
-  }));
+  return raw.map((c: any) =>
+    normalizeDefaultCategoryLabel({
+      id: String(c.id),
+      label: String(c.label || ''),
+      color: String(c.color || '#6366f1'),
+      ...(typeof c.isCustom === 'boolean' ? { isCustom: c.isCustom } : {}),
+      ...(c.badgeBg ? { badgeBg: String(c.badgeBg) } : {}),
+      ...(c.badgeText ? { badgeText: String(c.badgeText) } : {}),
+    })
+  );
 }
 
 /**
@@ -1442,7 +1449,7 @@ export function handleGlobalCategoriesSnapshot(
   if (docSnap.exists()) {
     const data = docSnap.data() as UserCategoriesDoc;
     if (data && Array.isArray(data.categories)) {
-      onCategoriesUpdate(data.categories, fromCache);
+      onCategoriesUpdate(data.categories.map(normalizeDefaultCategoryLabel), fromCache);
     }
   }
 }

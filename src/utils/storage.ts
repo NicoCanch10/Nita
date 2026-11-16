@@ -7,7 +7,7 @@ import {
   CategoryInfo, 
   getMonthKey 
 } from '../types/budget';
-import { DEFAULT_CATEGORIES } from './currency';
+import { DEFAULT_CATEGORIES, normalizeDefaultCategories } from './currency';
 
 // Legacy keys to be kept untouched and protected from automatic migration
 export const LEGACY_STORAGE_KEY = 'nita_distribuidor_app_data_v4';
@@ -301,7 +301,7 @@ export function loadGlobalCategories(userId?: string | null, isGuest?: boolean):
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          return parsed;
+          return normalizeDefaultCategories(parsed);
         }
       }
     }
@@ -404,7 +404,7 @@ export function loadBudgetState(userId?: string | null, isGuest?: boolean): Budg
                 }
               });
 
-              mData.categories = updatedCategories;
+              mData.categories = normalizeDefaultCategories(updatedCategories);
             }
           });
 
