@@ -6,13 +6,17 @@ import {
   getTranslations 
 } from '../utils/languages';
 import { CategoryManagerModal } from './CategoryManagerModal';
+import { parseAmountInput } from './FixedExpensesSection';
 import { 
   Plus, 
   Trash2, 
   ShoppingBag, 
   Search, 
   Clock, 
-  Palette 
+  Palette,
+  Pencil,
+  Check,
+  X
 } from 'lucide-react';
 
 interface DailyExpensesSectionProps {
@@ -26,6 +30,7 @@ interface DailyExpensesSectionProps {
   language?: string;
   onAddExpense: (expense: Omit<VariableExpense, 'id'>) => void;
   onDeleteExpense: (id: string) => void;
+  onUpdateExpense?: (id: string, updated: Partial<VariableExpense>) => void;
   onAddCategory: (category: CategoryInfo) => void;
   onUpdateCategoryColor: (id: string, color: string) => void;
   onUpdateCategoryLabel?: (id: string, label: string) => void;
@@ -43,6 +48,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   language = 'es',
   onAddExpense,
   onDeleteExpense,
+  onUpdateExpense,
   onAddCategory,
   onUpdateCategoryColor,
   onUpdateCategoryLabel,
@@ -75,10 +81,63 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
 
+  // Editing state for existing variable expenses
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [editDescription, setEditDescription] = useState<string>('');
+  const [editAmount, setEditAmount] = useState<string>('');
+  const [editCategory, setEditCategory] = useState<string>('');
+  const [editDate, setEditDate] = useState<string>('');
+
   // Sync date when the active month/year changes
   useEffect(() => {
     setDate(getDefaultExpenseDate(year, month, daysInMonth));
   }, [year, month, daysInMonth]);
+
+  useEffect(() => {
+    if (!editingExpenseId) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEditingExpenseId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editingExpenseId]);
+
+  const startEditExpense = (expense: VariableExpense) => {
+    setEditingExpenseId(expense.id);
+    setEditDescription(expense.description || '');
+    setEditAmount(expense.amount ? String(expense.amount) : '');
+    setEditCategory(expense.category || categories[0]?.id || 'food');
+    setEditDate(expense.date || getDefaultExpenseDate(year, month, daysInMonth));
+  };
+
+  const handleSaveEditExpense = (id: string) => {
+    if (!onUpdateExpense) return;
+    const finalDesc = editDescription.trim();
+    if (!finalDesc) return;
+    const numAmount = parseAmountInput(editAmount);
+    if (!numAmount || numAmount <= 0) return;
+    const effectiveDate = editDate && /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/.test(editDate)
+      ? editDate
+      : getDefaultExpenseDate(year, month, daysInMonth);
+
+    onUpdateExpense(id, {
+      description: finalDesc,
+      amount: numAmount,
+      category: editCategory || categories[0]?.id || 'food',
+      date: effectiveDate,
+    });
+    setEditingExpenseId(null);
+  };
+
+  const handleCancelEditExpense = () => {
+    setEditingExpenseId(null);
+    setEditDescription('');
+    setEditAmount('');
+    setEditCategory('');
+    setEditDate('');
+  };
 
   const currentCategoryInfo = getCategoryInfo(category, categories, language);
 
@@ -335,10 +394,21 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+                <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
                   <span className="text-sm font-black text-slate-900 dark:text-white tabular-nums">
                     {formatCurrency(expense.amount, currency)}
                   </span>
+
+                  {onUpdateExpense && (
+                    <button
+                      type="button"
+                      onClick={() => startEditExpense(expense)}
+                      title="Editar gasto (descripción, monto, categoría o fecha)"
+                      className="p-1.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -354,6 +424,149 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
           })
         )}
       </div>
+
+      {/* Centered Edit Variable Expense Modal */}
+      {(() => {
+        const editingExpense = editingExpenseId
+          ? expenses.find((e) => e && e.id === editingExpenseId) || null
+          : null;
+        if (!editingExpense) return null;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+            onClick={handleCancelEditExpense}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Modificar Gasto Variable"
+          >
+            <form
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSaveEditExpense(editingExpense.id);
+              }}
+              className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-3xl border border-emerald-200 dark:border-emerald-800 shadow-2xl space-y-4 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                <span className="text-sm sm:text-base font-black text-emerald-900 dark:text-emerald-300 flex items-center gap-2">
+                  <span className="p-1.5 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
+                    <Pencil className="w-4 h-4" />
+                  </span>
+                  Modificar Gasto Variable
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeleteExpense(editingExpense.id);
+                      setEditingExpenseId(null);
+                    }}
+                    title={t.deleteExpense}
+                    className="text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEditExpense}
+                    title="Cerrar"
+                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                {/* Descripción */}
+                <div className="sm:col-span-12">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Descripción
+                  </label>
+                  <input
+                    type="text"
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    placeholder={t.descPlaceholder}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
+                    autoFocus
+                    required
+                  />
+                </div>
+
+                {/* Monto */}
+                <div className="sm:col-span-4">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Importe ({currency})
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
+                    required
+                  />
+                </div>
+
+                {/* Categoría */}
+                <div className="sm:col-span-4">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Categoría
+                  </label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer truncate"
+                  >
+                    {sortedCategories.map((c) => (
+                      <option key={c.id} value={c.id} className="dark:bg-slate-800 dark:text-white">
+                        {getCategoryInfo(c.id, categories, language).label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Fecha */}
+                <div className="sm:col-span-4">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Fecha
+                  </label>
+                  <input
+                    type="date"
+                    value={editDate}
+                    min={`${year}-${String(month + 1).padStart(2, '0')}-01`}
+                    max={`${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleCancelEditExpense}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Guardar Cambios</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
 
       {/* Category Manager Modal */}
       <CategoryManagerModal

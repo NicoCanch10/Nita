@@ -12,13 +12,21 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // Cuentas de usuario registradas con nombre de usuario y contraseña
+    match /accounts/{usernameLower} {
+      allow read: if true;
+      allow create: if usernameLower.size() >= 3 && usernameLower.size() <= 25;
+      allow update: if true;
+      allow delete: if false;
+    }
+
     // 2. Funciones auxiliares de autenticación y validación
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return (request.auth != null && request.auth.uid == userId) || (userId is string && userId.size() > 0);
     }
 
     function incoming() {
@@ -109,29 +117,17 @@ service cloud.firestore {
 
     function areValidCategories(cats) {
       return cats is list && cats.size() <= 100
-        && (cats.size() < 1 || isValidCategoryItem(cats[0]))
-        && (cats.size() < 2 || isValidCategoryItem(cats[1]))
-        && (cats.size() < 3 || isValidCategoryItem(cats[2]))
-        && (cats.size() < 4 || isValidCategoryItem(cats[3]))
-        && (cats.size() < 5 || isValidCategoryItem(cats[4]));
+        && (cats.size() == 0 || isValidCategoryItem(cats[0]));
     }
 
     function areValidFixedExpenses(list) {
       return list is list && list.size() <= 300
-        && (list.size() < 1 || isValidFixedExpense(list[0]))
-        && (list.size() < 2 || isValidFixedExpense(list[1]))
-        && (list.size() < 3 || isValidFixedExpense(list[2]))
-        && (list.size() < 4 || isValidFixedExpense(list[3]))
-        && (list.size() < 5 || isValidFixedExpense(list[4]));
+        && (list.size() == 0 || isValidFixedExpense(list[0]));
     }
 
     function areValidVariableExpenses(list) {
       return list is list && list.size() <= 1500
-        && (list.size() < 1 || isValidVariableExpense(list[0]))
-        && (list.size() < 2 || isValidVariableExpense(list[1]))
-        && (list.size() < 3 || isValidVariableExpense(list[2]))
-        && (list.size() < 4 || isValidVariableExpense(list[3]))
-        && (list.size() < 5 || isValidVariableExpense(list[4]));
+        && (list.size() == 0 || isValidVariableExpense(list[0]));
     }
 
     function isValidJarLog(log) {

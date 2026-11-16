@@ -40,7 +40,8 @@ import {
   NITA_GUEST_MODE_KEY,
   CachedUserData
 } from '../src/context/AuthContext';
-import { ensureAuthPersistence, auth } from '../src/lib/firebase';
+import { ensureAuthPersistence, auth, signInWithGoogle } from '../src/lib/firebase';
+import { saveActiveSession, getActiveSession } from '../src/services/authAccountService';
 import { getUserStorageKey, GUEST_STORAGE_KEY } from '../src/utils/storage';
 
 describe('Pruebas de Persistencia de Sesión y Autenticación en NITA', () => {
@@ -51,6 +52,7 @@ describe('Pruebas de Persistencia de Sesión y Autenticación en NITA', () => {
   test('1. ensureAuthPersistence se resuelve exitosamente y no duplica instancias de Auth', async () => {
     // Verificar que la instancia auth es única y que ensureAuthPersistence resuelve
     assert.ok(auth, 'La instancia auth debe existir');
+    assert.strictEqual(typeof signInWithGoogle, 'function', 'signInWithGoogle debe estar exportado');
     const p1 = ensureAuthPersistence();
     const p2 = ensureAuthPersistence();
     assert.strictEqual(p1, p2, 'ensureAuthPersistence debe reutilizar la misma promesa activa');
@@ -141,5 +143,32 @@ describe('Pruebas de Persistencia de Sesión y Autenticación en NITA', () => {
     assert.strictEqual(keyA, 'nita_user_data_uid_alpha');
     assert.strictEqual(keyB, 'nita_user_data_uid_beta');
     assert.notStrictEqual(keyA, keyB, 'Las claves de almacenamiento deben ser estrictamente distintas');
+  });
+
+  test('7. saveActiveSession guarda nita_auth_choice como google o password según el proveedor', () => {
+    (globalThis as any).window = globalThis;
+    const googleUser: CachedUserData = {
+      uid: 'g_123',
+      email: 'nita@gmail.com',
+      displayName: 'NITA Google',
+      photoURL: 'https://lh3.googleusercontent.com/avatar.png',
+      providerId: 'google.com',
+    };
+
+    saveActiveSession(googleUser);
+    assert.strictEqual(localStorage.getItem(NITA_AUTH_CHOICE_KEY), 'google');
+    assert.strictEqual(getActiveSession()?.uid, 'g_123');
+
+    const passwordUser: CachedUserData = {
+      uid: 'usr_demo',
+      email: null,
+      displayName: 'demo',
+      photoURL: null,
+      providerId: 'password',
+    };
+
+    saveActiveSession(passwordUser);
+    assert.strictEqual(localStorage.getItem(NITA_AUTH_CHOICE_KEY), 'password');
+    assert.strictEqual(getActiveSession()?.uid, 'usr_demo');
   });
 });

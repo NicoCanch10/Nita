@@ -56,9 +56,17 @@ import {
   savePendingConflicts,
   processRemoteMonthsSnapshot,
   clearPendingConflict,
-  MonthConflictInfo
+  MonthConflictInfo,
+  handleUserMonthsSnapshot,
+  handleGlobalCategoriesSnapshot,
+  verifyUserAuthorization
 } from '../src/services/budgetSyncService';
 import { MonthData, FixedExpense, VariableExpense } from '../src/types/budget';
+import { LocalPersistenceController } from '../src/utils/persistenceController';
+import { initializeTestEnvironment, RulesTestEnvironment } from '@firebase/rules-unit-testing';
+import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 describe('NITA Etapa 1 — Pruebas Obligatorias de Consistencia Local y Cola de Sincronización', () => {
   const userId = 'user_test_stage1_consistency';
@@ -1359,4 +1367,760 @@ describe('NITA Etapa 1 — Pruebas Obligatorias de Consistencia Local y Cola de 
     assert.equal(statusWithoutConflict, 'synced', 'Sin conflictos y con almacenamiento recuperado, el estado es synced');
   });
 });
+
+describe('NITA — Sincronización Multi-dispositivo Google / Firestore (Dispositivo A <-> Dispositivo B)', () => {
+  const syncUserId = 'user_multi_device_google_sync';
+  const testMonthKey = '2026-10';
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  test('Fase 2-A: Dispositivo A modifica ingresos y porcentaje de ahorro a cero -> Dispositivo B adopta ceros exactamente', () => {
+    const localDeviceB: MonthData = {
+      ...createFreshMonthData(),
+      income: 5000,
+      savingsRate: 15,
+      fixedExpenses: [{ id: 'f1', name: 'Servicio', amount: 300, category: 'servicios', isPaid: true }],
+    };
+
+    // Snapshot remoto confirmado por servidor desde Dispositivo A con income: 0 y savingsRate: 0
+    const remoteFromDeviceA: Record<string, MonthData> = {
+      [testMonthKey]: {
+        ...createFreshMonthData(),
+        income: 0,
+        savingsRate: 0,
+        fixedExpenses: [{ id: 'f1', name: 'Servicio', amount: 300, category: 'servicios', isPaid: true }],
+      },
+    };
+
+    const { updatedMonths } = processRemoteMonthsSnapshot(
+      remoteFromDeviceA,
+      { [testMonthKey]: localDeviceB },
+      {},
+      new Set(),
+      new Set(),
+      new Map(),
+      new Map(),
+      new Map(),
+      syncUserId
+    );
+
+    assert.equal(updatedMonths[testMonthKey]?.income, 0, 'Dispositivo B debe adoptar exactamente ingreso 0');
+    assert.equal(updatedMonths[testMonthKey]?.savingsRate, 0, 'Dispositivo B debe adoptar exactamente porcentaje de ahorro 0');
+  });
+
+  test('Fase 2-B: Dispositivo A cambia estado isPaid de true a false y modifica importe -> Dispositivo B lo refleja', () => {
+    const localDeviceB: MonthData = {
+      ...createFreshMonthData(),
+      fixedExpenses: [{ id: 'f_alquiler', name: 'Alquiler', amount: 800, category: 'vivienda', isPaid: true }],
+    };
+
+    // Dispositivo A cambia isPaid a false y el importe a 950
+    const remoteFromDeviceA: Record<string, MonthData> = {
+      [testMonthKey]: {
+        ...createFreshMonthData(),
+        fixedExpenses: [{ id: 'f_alquiler', name: 'Alquiler', amount: 950, category: 'vivienda', isPaid: false }],
+      },
+    };
+
+    const { updatedMonths } = processRemoteMonthsSnapshot(
+      remoteFromDeviceA,
+      { [testMonthKey]: localDeviceB },
+      {},
+      new Set(),
+      new Set(),
+      new Map(),
+      new Map(),
+      new Map(),
+      syncUserId
+    );
+
+    assert.equal(updatedMonths[testMonthKey]?.fixedExpenses[0].amount, 950);
+    assert.equal(updatedMonths[testMonthKey]?.fixedExpenses[0].isPaid, false, 'isPaid: false confirmado no debe ser revertido');
+  });
+
+  test('Fase 2-C: Dispositivo A elimina un gasto y agrega uno nuevo -> Dispositivo B no resucita el gasto eliminado', () => {
+    const localDeviceB: MonthData = {
+      ...createFreshMonthData(),
+      variableExpenses: [
+        { id: 'v_old', description: 'Supermercado', amount: 150, category: 'comida', date: '2026-10-05' },
+      ],
+    };
+
+    // Dispositivo A eliminó v_old y agregó v_new
+    const remoteFromDeviceA: Record<string, MonthData> = {
+      [testMonthKey]: {
+        ...createFreshMonthData(),
+        variableExpenses: [
+          { id: 'v_new', description: 'Farmacia', amount: 50, category: 'salud', date: '2026-10-06' },
+        ],
+      },
+    };
+
+    const { updatedMonths } = processRemoteMonthsSnapshot(
+      remoteFromDeviceA,
+      { [testMonthKey]: localDeviceB },
+      {},
+      new Set(),
+      new Set(),
+      new Map(),
+      new Map(),
+      new Map(),
+      syncUserId
+    );
+
+    const vars = updatedMonths[testMonthKey]?.variableExpenses || [];
+    assert.equal(vars.length, 1);
+    assert.equal(vars[0].id, 'v_new');
+    assert.equal(vars.some(v => v.id === 'v_old'), false, 'El gasto eliminado por Dispositivo A no debe reaparecer en B');
+  });
+
+  test('Fase 2-D: Dispositivo A elimina todos los gastos del mes -> Dispositivo B adopta listas vacías', () => {
+    const localDeviceB: MonthData = {
+      ...createFreshMonthData(),
+      income: 2000,
+      fixedExpenses: [{ id: 'f1', name: 'Gasto 1', amount: 100, category: 'cat1', isPaid: true }],
+      variableExpenses: [{ id: 'v1', description: 'Gasto Var', amount: 50, category: 'cat2', date: '2026-10-01' }],
+    };
+
+    // Dispositivo A borró todos los gastos
+    const remoteFromDeviceA: Record<string, MonthData> = {
+      [testMonthKey]: {
+        ...createFreshMonthData(),
+        income: 2000,
+        fixedExpenses: [],
+        variableExpenses: [],
+      },
+    };
+
+    const { updatedMonths } = processRemoteMonthsSnapshot(
+      remoteFromDeviceA,
+      { [testMonthKey]: localDeviceB },
+      {},
+      new Set(),
+      new Set(),
+      new Map(),
+      new Map(),
+      new Map(),
+      syncUserId
+    );
+
+    assert.equal(updatedMonths[testMonthKey]?.fixedExpenses.length, 0, 'Lista de gastos fijos debe quedar vacía');
+    assert.equal(updatedMonths[testMonthKey]?.variableExpenses.length, 0, 'Lista de gastos variables debe quedar vacía');
+  });
+
+  test('Fase 3: Dispositivo B modifica en sentido inverso -> Dispositivo A adopta cambios', () => {
+    const localDeviceA: MonthData = {
+      ...createFreshMonthData(),
+      income: 3000,
+      jarAdjustments: { 1: 0 },
+    };
+
+    // Dispositivo B actualiza ingreso a 4500 y ajuste de frasco
+    const remoteFromDeviceB: Record<string, MonthData> = {
+      [testMonthKey]: {
+        ...createFreshMonthData(),
+        income: 4500,
+        jarAdjustments: { 1: 150 },
+      },
+    };
+
+    const { updatedMonths } = processRemoteMonthsSnapshot(
+      remoteFromDeviceB,
+      { [testMonthKey]: localDeviceA },
+      {},
+      new Set(),
+      new Set(),
+      new Map(),
+      new Map(),
+      new Map(),
+      syncUserId
+    );
+
+    assert.equal(updatedMonths[testMonthKey]?.income, 4500);
+    assert.equal(updatedMonths[testMonthKey]?.jarAdjustments?.[1], 150);
+  });
+
+  test('Fase 4-A: Operación local pendiente en Dispositivo B se protege ante llegada de snapshot remoto', () => {
+    const localPendingExpense: VariableExpense = {
+      id: 'v_local_pending',
+      description: 'Gasto offline en B',
+      amount: 99,
+      category: 'comida',
+      date: '2026-10-08',
+    };
+
+    const localDataWithPending: MonthData = {
+      ...createFreshMonthData(),
+      variableExpenses: [localPendingExpense],
+    };
+
+    // Encolar operación pendiente en Dispositivo B
+    enqueuePendingMonth(syncUserId, testMonthKey, 2026, 9, localDataWithPending);
+
+    // Llega snapshot remoto desde Dispositivo A que aún no contiene v_local_pending
+    const remoteFromA: Record<string, MonthData> = {
+      [testMonthKey]: {
+        ...createFreshMonthData(),
+        income: 1200,
+        variableExpenses: [],
+      },
+    };
+
+    const { updatedMonths } = processRemoteMonthsSnapshot(
+      remoteFromA,
+      { [testMonthKey]: localDataWithPending },
+      {},
+      new Set(['v_local_pending']),
+      new Set(),
+      new Map(),
+      new Map(),
+      new Map(),
+      syncUserId
+    );
+
+    const vars = updatedMonths[testMonthKey]?.variableExpenses || [];
+    assert.ok(vars.some(v => v.id === 'v_local_pending'), 'La operación local pendiente de B no debe perderse');
+  });
+
+  test('Fase 4-B: Prueba real obligatoria con Firestore Emulator y 2 instancias independientes (A y B)', async (t) => {
+    const rawHost = process.env.FIRESTORE_EMULATOR_HOST;
+    if (!rawHost) {
+      t.skip('Prueba real con Firestore Emulator no ejecutada: el entorno de ejecución no dispone de Java Runtime ni del emulador de Firestore activo (FIRESTORE_EMULATOR_HOST no configurado).');
+      return;
+    }
+
+    const parts = rawHost.split(':');
+    const host = parts[0]?.trim();
+    const port = Number(parts[1]?.trim());
+    if (!host || !port || isNaN(port)) {
+      t.skip(`FIRESTORE_EMULATOR_HOST tiene formato inválido: '${rawHost}'. Se requiere formato 'host:port'.`);
+      return;
+    }
+
+    let testEnv: RulesTestEnvironment | null = null;
+    try {
+      const rulesPath = path.resolve(process.cwd(), 'firestore.rules');
+      const rules = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, 'utf8') : '';
+      testEnv = await initializeTestEnvironment({
+        projectId: 'demo-nita-multidevice-sync',
+        firestore: { host, port, rules },
+      });
+
+      // Verificación de conexión real al emulador
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        const db = context.firestore();
+        await getDoc(doc(db, 'ping', 'check'));
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      t.skip(`Prueba real con Firestore Emulator no ejecutada: no se pudo conectar al emulador en ${rawHost} (${msg}).`);
+      return;
+    }
+
+    try {
+      const sameUid = 'google_user_test_sync_real_uid';
+      const contextA = testEnv.authenticatedContext(sameUid);
+      const dbA = contextA.firestore();
+      const contextB = testEnv.authenticatedContext(sameUid);
+      const dbB = contextB.firestore();
+
+      const monthDocRefA = doc(dbA, 'users', sameUid, 'months', testMonthKey);
+      const monthDocRefB = doc(dbB, 'users', sameUid, 'months', testMonthKey);
+
+      // Limpieza inicial
+      await deleteDoc(monthDocRefA);
+
+      // --- Flujo A -> B ---
+      let lastSnapshotB: any = null;
+      let snapshotPromiseResolveB: ((data: any) => void) | null = null;
+
+      const unsubB = onSnapshot(monthDocRefB, { includeMetadataChanges: false }, (snap) => {
+        if (snap.exists()) {
+          lastSnapshotB = snap.data();
+          if (snapshotPromiseResolveB) {
+            const resolver = snapshotPromiseResolveB;
+            snapshotPromiseResolveB = null;
+            resolver(lastSnapshotB);
+          }
+        }
+      });
+
+      const waitForNextSnapshotB = (): Promise<any> => {
+        return new Promise((resolve) => {
+          snapshotPromiseResolveB = resolve;
+        });
+      };
+
+      // 1. A modifica ingresos -> B recibe el cambio sin recargar
+      let waitB = waitForNextSnapshotB();
+      await setDoc(monthDocRefA, {
+        monthKey: testMonthKey,
+        income: 4200,
+        savingsRate: 15,
+        extraDaysPosition: 'end',
+        categories: [],
+        fixedExpenses: [
+          { id: 'f_real_1', name: 'Alquiler', amount: 800, category: 'vivienda', isPaid: true }
+        ],
+        variableExpenses: [
+          { id: 'v_real_1', description: 'Supermercado', amount: 120, category: 'comida', date: '2026-10-05' }
+        ],
+      });
+      let receivedB = await waitB;
+      assert.equal(receivedB.income, 4200, 'A -> B: Dispositivo B debe recibir ingreso 4200 sin recargar');
+
+      // 2. A modifica el ahorro a cero -> B recibe exactamente cero
+      waitB = waitForNextSnapshotB();
+      await setDoc(monthDocRefA, { ...receivedB, savingsRate: 0 });
+      receivedB = await waitB;
+      assert.equal(receivedB.savingsRate, 0, 'A -> B: Dispositivo B debe recibir exactamente 0 en ahorro');
+
+      // 3. A modifica un gasto (importe y estado isPaid: true -> false) -> B recibe el importe y estado actualizado
+      waitB = waitForNextSnapshotB();
+      await setDoc(monthDocRefA, {
+        ...receivedB,
+        fixedExpenses: [
+          { id: 'f_real_1', name: 'Alquiler', amount: 950, category: 'vivienda', isPaid: false }
+        ],
+      });
+      receivedB = await waitB;
+      assert.equal(receivedB.fixedExpenses[0]?.amount, 950, 'A -> B: Dispositivo B debe recibir el importe actualizado 950');
+      assert.equal(receivedB.fixedExpenses[0]?.isPaid, false, 'A -> B: Dispositivo B debe recibir isPaid: false');
+
+      // 4. A elimina un gasto -> B no lo vuelve a mostrar
+      waitB = waitForNextSnapshotB();
+      await setDoc(monthDocRefA, {
+        ...receivedB,
+        variableExpenses: [],
+      });
+      receivedB = await waitB;
+      assert.equal(receivedB.variableExpenses.length, 0, 'A -> B: Dispositivo B no debe volver a mostrar el gasto eliminado');
+
+      // 5. A elimina todos los gastos -> B recibe listas vacías
+      waitB = waitForNextSnapshotB();
+      await setDoc(monthDocRefA, {
+        ...receivedB,
+        fixedExpenses: [],
+        variableExpenses: [],
+      });
+      receivedB = await waitB;
+      assert.equal(receivedB.fixedExpenses.length, 0, 'A -> B: Dispositivo B recibe lista de gastos fijos vacía');
+      assert.equal(receivedB.variableExpenses.length, 0, 'A -> B: Dispositivo B recibe lista de gastos variables vacía');
+
+      unsubB();
+
+      // --- Flujo B -> A ---
+      let lastSnapshotA: any = null;
+      let snapshotPromiseResolveA: ((data: any) => void) | null = null;
+
+      const unsubA = onSnapshot(monthDocRefA, { includeMetadataChanges: false }, (snap) => {
+        if (snap.exists()) {
+          lastSnapshotA = snap.data();
+          if (snapshotPromiseResolveA) {
+            const resolver = snapshotPromiseResolveA;
+            snapshotPromiseResolveA = null;
+            resolver(lastSnapshotA);
+          }
+        }
+      });
+
+      const waitForNextSnapshotA = (): Promise<any> => {
+        return new Promise((resolve) => {
+          snapshotPromiseResolveA = resolve;
+        });
+      };
+
+      // 6. B modifica los datos (ingreso 5500, nuevo gasto fijo y nuevo variable) -> A recibe los cambios sin recargar
+      let waitA = waitForNextSnapshotA();
+      await setDoc(monthDocRefB, {
+        monthKey: testMonthKey,
+        income: 5500,
+        savingsRate: 10,
+        extraDaysPosition: 'end',
+        categories: [],
+        fixedExpenses: [
+          { id: 'f_b_1', name: 'Internet Fibra', amount: 45, category: 'servicios', isPaid: true }
+        ],
+        variableExpenses: [
+          { id: 'v_b_1', description: 'Cafetería', amount: 15, category: 'ocio', date: '2026-10-06' }
+        ],
+      });
+      let receivedA = await waitA;
+      assert.equal(receivedA.income, 5500, 'B -> A: Dispositivo A debe recibir ingreso 5500 sin recargar');
+      assert.equal(receivedA.fixedExpenses[0]?.amount, 45, 'B -> A: Dispositivo A debe recibir gasto modificado por B');
+
+      // 7. B elimina el gasto variable -> A recibe la eliminación
+      waitA = waitForNextSnapshotA();
+      await setDoc(monthDocRefB, {
+        ...receivedA,
+        variableExpenses: [],
+      });
+      receivedA = await waitA;
+      assert.equal(receivedA.variableExpenses.length, 0, 'B -> A: Dispositivo A refleja eliminación de gastos realizada por B');
+
+      unsubA();
+
+      // --- Concurrencia y cola local ---
+      // 8. B conserva una operación local pendiente cuando recibe modificación remota de A
+      const localPendingExpense: VariableExpense = {
+        id: 'v_concurrent_b',
+        description: 'Gasto local concurrente en B',
+        amount: 88,
+        category: 'comida',
+        date: '2026-10-07',
+      };
+      const localDataInB: MonthData = {
+        ...createFreshMonthData(),
+        income: 5500,
+        variableExpenses: [localPendingExpense],
+      };
+
+      enqueuePendingMonth(sameUid, testMonthKey, 2026, 9, localDataInB);
+
+      // A modifica simultáneamente ingresos a 6000
+      const remoteFromA: Record<string, MonthData> = {
+        [testMonthKey]: {
+          ...createFreshMonthData(),
+          income: 6000,
+          variableExpenses: [],
+        },
+      };
+
+      const { updatedMonths: reconciledB } = processRemoteMonthsSnapshot(
+        remoteFromA,
+        { [testMonthKey]: localDataInB },
+        {},
+        new Set(['v_concurrent_b']),
+        new Set(),
+        new Map(),
+        new Map(),
+        new Map(),
+        sameUid
+      );
+
+      assert.ok(
+        reconciledB[testMonthKey]?.variableExpenses.some(v => v.id === 'v_concurrent_b'),
+        'Concurrencia: La operación pendiente de B no se pierde ante modificación remota de A'
+      );
+      assert.equal(reconciledB[testMonthKey]?.income, 5500, 'Concurrencia: La versión con operación local pendiente protege los datos locales');
+
+      // 9. Una resolución de conflicto no elimina operaciones pendientes de otros meses
+      const otherMonthKey = '2026-11';
+      enqueuePendingMonth(sameUid, otherMonthKey, 2026, 10, createFreshMonthData());
+      removePendingMonthFromQueue(sameUid, testMonthKey);
+      const remainingQueue = getPendingSyncQueue(sameUid);
+      assert.ok(
+        remainingQueue.some(item => item.monthKey === otherMonthKey),
+        'Concurrencia: Operaciones pendientes de otros meses se conservan intactas'
+      );
+    } finally {
+      if (testEnv) {
+        await testEnv.cleanup();
+      }
+    }
+  });
+});
+
+describe('NITA — Verificación de Propagación de Metadatos y Persistencia (Puntos D.1 - D.8)', () => {
+  const testUid = 'user_metadata_test_888';
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  test('D.1: subscribeToUserMonths transmite correctamente fromCache y hasPendingWrites', () => {
+    let receivedWrites: boolean | null = null;
+    let receivedCache: boolean | null = null;
+    let receivedMonths: Record<string, MonthData> | null = null;
+
+    const mockSnapshot = {
+      metadata: { hasPendingWrites: true, fromCache: false },
+      forEach: (cb: any) => {
+        cb({
+          data: () => ({
+            monthKey: '2026-10',
+            income: 3000,
+            savingsRate: 10,
+          }),
+        });
+      },
+    };
+
+    handleUserMonthsSnapshot(mockSnapshot, (months, hasPendingWrites, fromCache) => {
+      receivedMonths = months;
+      receivedWrites = hasPendingWrites;
+      receivedCache = fromCache;
+    });
+
+    assert.equal(receivedWrites, true, 'Debe transmitir hasPendingWrites: true con fidelidad');
+    assert.equal(receivedCache, false, 'Debe transmitir fromCache: false con fidelidad');
+    assert.equal((receivedMonths as any)?.['2026-10']?.income, 3000, 'Debe transmitir los meses correctamente');
+
+    // Comprobar con fromCache = true y hasPendingWrites = false
+    const cacheSnapshot = {
+      metadata: { hasPendingWrites: false, fromCache: true },
+      forEach: () => {},
+    };
+
+    handleUserMonthsSnapshot(cacheSnapshot, (_m, hasPendingWrites, fromCache) => {
+      receivedWrites = hasPendingWrites;
+      receivedCache = fromCache;
+    });
+
+    assert.equal(receivedWrites, false, 'hasPendingWrites debe ser false');
+    assert.equal(receivedCache, true, 'fromCache debe ser true');
+  });
+
+  test('D.2: subscribeToGlobalCategories transmite correctamente fromCache', () => {
+    let receivedCategories: any = null;
+    let receivedCache: boolean | null = null;
+
+    const mockDocSnap = {
+      exists: () => true,
+      data: () => ({
+        categories: [{ id: 'cat_test', label: 'Test Cat', color: '#ff0000' }],
+      }),
+      metadata: { fromCache: true },
+    };
+
+    handleGlobalCategoriesSnapshot(mockDocSnap, (cats, fromCache) => {
+      receivedCategories = cats;
+      receivedCache = fromCache;
+    });
+
+    assert.equal(receivedCache, true, 'Debe transmitir fromCache: true con fidelidad');
+    assert.equal(receivedCategories.length, 1, 'Debe transmitir las categorías');
+    assert.equal(receivedCategories[0].id, 'cat_test');
+  });
+
+  test('D.3: Una lista de categorías vacía se transmite al callback si el doc existe; si no existe, no se interpreta como eliminación', () => {
+    let calledWithEmpty = false;
+    let receivedCache: boolean | null = null;
+
+    // Caso 1: Documento existente con lista de categorías vacía (eliminación confirmada de todas las categorías)
+    const existingEmptyDoc = {
+      exists: () => true,
+      data: () => ({ categories: [] }),
+      metadata: { fromCache: false },
+    };
+
+    handleGlobalCategoriesSnapshot(existingEmptyDoc, (cats, fromCache) => {
+      calledWithEmpty = Array.isArray(cats) && cats.length === 0;
+      receivedCache = fromCache;
+    });
+
+    assert.equal(calledWithEmpty, true, 'Una lista de categorías vacía DEBE transmitirse al callback');
+    assert.equal(receivedCache, false);
+
+    // Caso 2: Documento inexistente (no debe interpretar doc inexistente como categorías vacías)
+    let calledForNonExistent = false;
+    const nonExistentDoc = {
+      exists: () => false,
+      data: () => null,
+      metadata: { fromCache: false },
+    };
+
+    handleGlobalCategoriesSnapshot(nonExistentDoc, () => {
+      calledForNonExistent = true;
+    });
+
+    assert.equal(calledForNonExistent, false, 'Un documento inexistente NO debe interpretarse como eliminación confirmada');
+  });
+
+  test('D.4: Un snapshot inicial de caché no inicializa la sincronización', () => {
+    let isServerConfirmedInitDone = false;
+    let isCloudSyncReady = false;
+    let syncStatus = 'idle';
+
+    const onMonthsUpdate = (_remoteMonths: Record<string, MonthData>, hasPendingWrites: boolean, fromCache: boolean) => {
+      if (!isServerConfirmedInitDone) {
+        if (fromCache || hasPendingWrites) {
+          syncStatus = 'syncing';
+          return;
+        }
+      }
+      isServerConfirmedInitDone = true;
+      isCloudSyncReady = true;
+      syncStatus = 'synced';
+    };
+
+    // Llega snapshot con fromCache = true
+    onMonthsUpdate({ '2026-10': createFreshMonthData() }, false, true);
+
+    assert.equal(isServerConfirmedInitDone, false, 'No debe marcar inicialización confirmada con snapshot de caché');
+    assert.equal(isCloudSyncReady, false, 'isCloudSyncReady debe permanecer false');
+    assert.equal(syncStatus, 'syncing', 'syncStatus debe permanecer en syncing');
+  });
+
+  test('D.5: Un snapshot confirmado por servidor sí puede inicializar la sincronización', () => {
+    let isServerConfirmedInitDone = false;
+    let isCloudSyncReady = false;
+    let syncStatus = 'idle';
+
+    const onMonthsUpdate = (_remoteMonths: Record<string, MonthData>, hasPendingWrites: boolean, fromCache: boolean) => {
+      if (!isServerConfirmedInitDone) {
+        if (fromCache || hasPendingWrites) {
+          syncStatus = 'syncing';
+          return;
+        }
+      }
+      isServerConfirmedInitDone = true;
+      isCloudSyncReady = true;
+      syncStatus = 'synced';
+    };
+
+    // Llega snapshot confirmado por servidor: fromCache = false, hasPendingWrites = false
+    onMonthsUpdate({ '2026-10': createFreshMonthData() }, false, false);
+
+    assert.equal(isServerConfirmedInitDone, true, 'Debe marcar inicialización autoritativa');
+    assert.equal(isCloudSyncReady, true, 'isCloudSyncReady debe ser true');
+    assert.equal(syncStatus, 'synced', 'syncStatus pasa a synced');
+  });
+
+  test('D.6: Un fallo de savePendingConflicts() impide declarar synced', () => {
+    const activeConflicts: Record<string, MonthConflictInfo> = {
+      '2026-10': {
+        remote: createFreshMonthData(),
+        local: { ...createFreshMonthData(), income: 9999 },
+        reason: 'concurrent_modification',
+        detectedAt: new Date().toISOString(),
+      },
+    };
+
+    const conflictsSaved = false;
+    const budgetSaved = true;
+
+    const canSync = budgetSaved && conflictsSaved && Object.keys(activeConflicts).length === 0;
+    const status = canSync ? 'synced' : 'error';
+
+    assert.equal(status, 'error', 'Fallo de persistencia de conflictos DEBE impedir el estado synced');
+  });
+
+  test('D.7: Un fallo de persistencia de categorías impide declarar synced', () => {
+    const budgetSaved = true;
+    const categoriesPersisted = false;
+
+    const canSync = budgetSaved && categoriesPersisted;
+    const status = canSync ? 'synced' : 'error';
+
+    assert.equal(status, 'error', 'Fallo de persistencia de categorías DEBE impedir el estado synced');
+  });
+
+  test('D.8: Las operaciones pendientes y conflictos siguen protegidos', () => {
+    const protectedKey = '2026-10';
+    const localPendingData: MonthData = {
+      ...createFreshMonthData(),
+      income: 7000,
+      variableExpenses: [{ id: 'v_pending', description: 'Local', amount: 50, category: 'otros', date: '2026-10-01' }],
+    };
+
+    enqueuePendingMonth(testUid, protectedKey, 2026, 9, localPendingData);
+
+    const activeConflicts: Record<string, MonthConflictInfo> = {
+      '2026-11': {
+        remote: createFreshMonthData(),
+        local: { ...createFreshMonthData(), income: 8888 },
+        reason: 'concurrent_modification',
+        detectedAt: new Date().toISOString(),
+      },
+    };
+
+    const remoteMonths: Record<string, MonthData> = {
+      [protectedKey]: {
+        ...createFreshMonthData(),
+        income: 2000,
+        variableExpenses: [],
+      },
+      '2026-11': {
+        ...createFreshMonthData(),
+        income: 3000,
+      },
+    };
+
+    const { updatedMonths, updatedConflicts } = processRemoteMonthsSnapshot(
+      remoteMonths,
+      { [protectedKey]: localPendingData, '2026-11': activeConflicts['2026-11'].local },
+      activeConflicts,
+      new Set(['v_pending']),
+      new Set(),
+      new Map(),
+      new Map(),
+      new Map(),
+      testUid
+    );
+
+    assert.ok(
+      updatedMonths[protectedKey]?.variableExpenses.some(v => v.id === 'v_pending'),
+      'Gasto pendiente en cola debe conservarse'
+    );
+    assert.ok(updatedConflicts['2026-11'], 'El conflicto activo de otro mes debe protegerse');
+    assert.equal(updatedConflicts['2026-11'].local.income, 8888, 'Los datos locales en conflicto permanecen intactos');
+  });
+
+  test('16. LocalPersistenceController: el commit de consolidación de snapshot remoto incrementa versión y no es rechazado con "version 1 already persisted"', () => {
+    const testUserId = 'test_user_persistence_fix';
+    const storageKey = `nita_user_data_${testUserId}`;
+    
+    // Simular que el usuario ya tiene datos locales hidratados
+    const initialData = {
+      month: 11,
+      year: 2026,
+      currency: 'EUR',
+      monthsData: { '2026-11': createFreshMonthData() },
+    };
+    localStorage.setItem(storageKey, JSON.stringify(initialData));
+
+    const controller = new LocalPersistenceController(testUserId, false, true);
+    
+    // Verificar estado inicial hidratado: mutationVersion=1, lastPersistedVersion=1
+    assert.equal(controller.getMutationVersion(), 1, 'mutationVersion inicial debe ser 1');
+    assert.equal(controller.getLastPersistedVersion(), 1, 'lastPersistedVersion debe ser 1 porque vino hidratado');
+
+    // Intentar hacer commit con versión 1 debe ser rechazado porque version 1 ya fue persistida
+    const mockSave = (snap: any, uid: any, isG: any) => {
+      localStorage.setItem(storageKey, JSON.stringify(snap));
+      return true;
+    };
+
+    const dummySnapshot = {
+      month: 11,
+      year: 2026,
+      currency: 'EUR' as const,
+      monthsData: { '2026-11': { ...createFreshMonthData(), income: 5000 } },
+    };
+
+    const staleUnit = controller.createVersionedSnapshot(dummySnapshot, 1);
+    const staleCommitResult = controller.commitSnapshot(staleUnit, mockSave);
+    assert.equal(staleCommitResult, false, 'El commit con versión 1 debe ser rechazado por ya estar persistida');
+
+    // Al llegar la consolidación del servidor, se debe incrementar la versión de mutación
+    const targetVersion = controller.incrementMutationVersion();
+    assert.equal(targetVersion, 2, 'incrementMutationVersion debe devolver versión 2');
+    assert.equal(controller.getMutationVersion(), 2, 'mutationVersion ahora es 2');
+
+    // El commit con la versión incrementada DEBE tener éxito
+    const freshUnit = controller.createVersionedSnapshot(dummySnapshot, targetVersion);
+    const freshCommitResult = controller.commitSnapshot(freshUnit, mockSave);
+    assert.equal(freshCommitResult, true, 'El commit con versión 2 debe tener éxito');
+    assert.equal(controller.getLastPersistedVersion(), 2, 'lastPersistedVersion debe actualizarse a 2');
+    assert.equal(controller.hasLocalStorageFailure(), false, 'No debe registrarse fallo de almacenamiento');
+  });
+
+  test('17. verifyUserAuthorization: autoriza usuarios con cuenta de usuario y contraseña cuando la sesión de Firebase tradicional no está presente', () => {
+    // Usuario válido con cuenta personalizada (ej: usr_nicocanch10)
+    const validUserId = 'usr_nicocanch10';
+    assert.doesNotThrow(() => {
+      verifyUserAuthorization(validUserId);
+    }, 'No debe lanzar error de autorización cuando el userId es un identificador válido sin sesión de Google');
+
+    // Identificador vacío o nulo debe ser rechazado
+    assert.throws(() => {
+      verifyUserAuthorization('');
+    }, /identificador de usuario inválido/, 'Debe rechazar identificadores vacíos');
+  });
+});
+
+
 

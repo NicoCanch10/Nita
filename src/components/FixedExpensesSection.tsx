@@ -104,6 +104,17 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   const [editCategory, setEditCategory] = useState<string>('');
   const [editDueDate, setEditDueDate] = useState<string>('');
 
+  useEffect(() => {
+    if (!editingExpenseId) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEditingExpenseId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editingExpenseId]);
+
   const startEditExpense = (expense: FixedExpense) => {
     setEditingExpenseId(expense.id);
     setEditName(expense.name || '');
@@ -469,156 +480,192 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                   </div>
                 </div>
 
-                {/* Amount, inline edit, and actions */}
-                {editingExpenseId === expense.id ? (
-                  <div className="w-full bg-blue-50/80 dark:bg-slate-800/90 p-3 sm:p-4 rounded-2xl border border-blue-300 dark:border-blue-700 shadow-xs space-y-3">
-                    <div className="flex items-center justify-between gap-2 border-b border-blue-200/60 dark:border-slate-700/60 pb-2">
-                      <span className="text-xs font-black text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
-                        <Pencil className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                        Modificar Gasto Fijo
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onDeleteExpense(expense.id);
-                          setEditingExpenseId(null);
-                        }}
-                        title="Eliminar este gasto"
-                        className="text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/60 px-2 py-1 rounded-lg text-2xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Eliminar</span>
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3 items-center">
-                      {/* Concepto / Nombre */}
-                      <div className="sm:col-span-5">
-                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                          Concepto
-                        </label>
-                        <input
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          placeholder="Concepto"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
-                          autoFocus
-                        />
-                      </div>
-
-                      {/* Monto */}
-                      <div className="sm:col-span-3">
-                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                          Importe ({currency})
-                        </label>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={editAmount}
-                          onChange={(e) => setEditAmount(e.target.value)}
-                          placeholder="0.00"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
-                        />
-                      </div>
-
-                      {/* Categoría */}
-                      <div className="sm:col-span-2">
-                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                          Categoría
-                        </label>
-                        <select
-                          value={editCategory}
-                          onChange={(e) => setEditCategory(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer truncate"
-                        >
-                          {sortedCategories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {getCategoryInfo(c.id, categories, language).label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Vencimiento */}
-                      <div className="sm:col-span-2">
-                        <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                          Vto (1-{daysInMonth})
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          max={daysInMonth}
-                          value={editDueDate}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === '') {
-                              setEditDueDate('');
-                              return;
-                            }
-                            const num = parseInt(val, 10);
-                            if (!isNaN(num)) {
-                              if (num > daysInMonth) setEditDueDate(String(daysInMonth));
-                              else if (num < 1) setEditDueDate('1');
-                              else setEditDueDate(val);
-                            }
-                          }}
-                          placeholder="Opcional"
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold text-center tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleCancelEditExpense}
-                        className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold transition-colors cursor-pointer"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveEditExpense(expense.id)}
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-2xs"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Guardar Cambios</span>
-                      </button>
-                    </div>
+                {/* Amount and actions */}
+                <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+                  <div className="text-right">
+                    <span className="text-sm font-black tabular-nums block text-slate-900 dark:text-white">
+                      {formatCurrency(expense.amount, currency)}
+                    </span>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-                    <div className="text-right">
-                      <span className="text-sm font-black tabular-nums block text-slate-900 dark:text-white">
-                        {formatCurrency(expense.amount, currency)}
-                      </span>
-                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => startEditExpense(expense)}
-                      title="Editar gasto (concepto, monto, categoría o vencimiento)"
-                      className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-xl transition-colors cursor-pointer"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => startEditExpense(expense)}
+                    title="Editar gasto (concepto, monto, categoría o vencimiento)"
+                    className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => onDeleteExpense(expense.id)}
-                      title="Eliminar gasto"
-                      className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => onDeleteExpense(expense.id)}
+                    title="Eliminar gasto"
+                    className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             );
           })
         )}
       </div>
+
+      {/* Centered Edit Fixed Expense Modal */}
+      {(() => {
+        const editingExpense = editingExpenseId
+          ? safeExpenses.find((e) => e && e.id === editingExpenseId) || null
+          : null;
+        if (!editingExpense) return null;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+            onClick={handleCancelEditExpense}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Modificar Gasto Fijo"
+          >
+            <form
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSaveEditExpense(editingExpense.id);
+              }}
+              className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-3xl border border-blue-200 dark:border-blue-800 shadow-2xl space-y-4 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                <span className="text-sm sm:text-base font-black text-blue-900 dark:text-blue-300 flex items-center gap-2">
+                  <span className="p-1.5 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
+                    <Pencil className="w-4 h-4" />
+                  </span>
+                  Modificar Gasto Fijo
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeleteExpense(editingExpense.id);
+                      setEditingExpenseId(null);
+                    }}
+                    title="Eliminar este gasto"
+                    className="text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEditExpense}
+                    title="Cerrar"
+                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                {/* Concepto / Nombre */}
+                <div className="sm:col-span-12">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Concepto
+                  </label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Concepto"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
+                    autoFocus
+                    required
+                  />
+                </div>
+
+                {/* Monto */}
+                <div className="sm:col-span-5">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Importe ({currency})
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                {/* Categoría */}
+                <div className="sm:col-span-4">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Categoría
+                  </label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer truncate"
+                  >
+                    {sortedCategories.map((c) => (
+                      <option key={c.id} value={c.id} className="dark:bg-slate-800 dark:text-white">
+                        {getCategoryInfo(c.id, categories, language).label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Vencimiento */}
+                <div className="sm:col-span-3">
+                  <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Vto (1-{daysInMonth})
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={daysInMonth}
+                    value={editDueDate}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setEditDueDate('');
+                        return;
+                      }
+                      const num = parseInt(val, 10);
+                      if (!isNaN(num)) {
+                        if (num > daysInMonth) setEditDueDate(String(daysInMonth));
+                        else if (num < 1) setEditDueDate('1');
+                        else setEditDueDate(val);
+                      }
+                    }}
+                    placeholder="Opcional"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2.5 text-sm font-bold text-center tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleCancelEditExpense}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Guardar Cambios</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
 
       {/* Category Manager Modal */}
       <CategoryManagerModal

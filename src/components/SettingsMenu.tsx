@@ -17,6 +17,7 @@ import {
 } from '../utils/languages';
 import { CountryFlag } from './CountryFlag';
 import { useAuth } from '../context/AuthContext';
+import { APP_VERSION } from '../utils/version';
 import { 
   Settings, 
   Coins, 
@@ -85,7 +86,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { isInstalled } = usePWAInstall();
-  const { user, signOutUser, isGoogleLinked, isAppleLinked, isGuestMode, exitGuestMode, isFirebaseAuthActive, signInWithGoogle } = useAuth();
+  const { user, signOutUser, isGuestMode, exitGuestMode, isFirebaseAuthActive } = useAuth();
 
   // Language state
   const [internalLanguage, setInternalLanguage] = useState(() => loadSelectedLanguage());
@@ -557,7 +558,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/70' 
                       : 'text-amber-700 dark:text-amber-400 bg-amber-100/80 dark:bg-amber-950/70'
                   }`}>
-                    {isFirebaseAuthActive ? 'EN LÍNEA ✓' : 'POR VALIDAR'}
+                    {isFirebaseAuthActive ? 'EN LÍNEA ✓' : 'SIN CONEXIÓN'}
                   </span>
                 </label>
                 <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-2 text-2xs">
@@ -568,8 +569,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     </span>
                   </div>
                   {user.email && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500 dark:text-slate-400">Email:</span>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[10px]">
+                      <span className="text-slate-500 dark:text-slate-400">Correo:</span>
                       <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[160px]">
                         {user.email}
                       </span>
@@ -581,7 +582,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       {isFirebaseAuthActive ? (
                         <span className="text-emerald-600 dark:text-emerald-400">Sincronización activa ✓</span>
                       ) : (
-                        <span className="text-amber-600 dark:text-amber-400">Requiere validar Google</span>
+                        <span className="text-amber-600 dark:text-amber-400">Guardado local</span>
                       )}
                     </div>
                   </div>
@@ -597,25 +598,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-extrabold rounded-xl transition-all cursor-pointer text-2xs shadow-xs disabled:opacity-60"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isSyncingManual ? 'animate-spin' : ''}`} />
-                    <span>{isSyncingManual ? 'Sincronizando con Google...' : 'Sincronizar datos con Google ahora'}</span>
-                  </button>
-                )}
-
-                {!isFirebaseAuthActive && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setIsOpen(false);
-                      try {
-                        await signInWithGoogle();
-                      } catch (e) {
-                        console.warn('Google validation error:', e);
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition-colors cursor-pointer text-2xs shadow-xs"
-                  >
-                    <Cloud className="w-3.5 h-3.5" />
-                    <span>Conectar y validar con Google</span>
+                    <span>{isSyncingManual ? 'Sincronizando con la nube...' : 'Sincronizar datos ahora'}</span>
                   </button>
                 )}
 
@@ -647,7 +630,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     Estás usando NITA sin cuenta
                   </p>
                   <p className="text-slate-500 dark:text-slate-400 text-3xs leading-relaxed">
-                    Tus datos se guardan únicamente en este navegador. Para respaldar y sincronizar entre tu computadora y celular, inicia sesión con Google o Apple.
+                    Tus datos se guardan únicamente en este navegador. Para respaldar y sincronizar entre tu computadora y celular, inicia sesión con Google o crea tu cuenta con usuario y contraseña.
                   </p>
                 </div>
                 <button
@@ -659,24 +642,32 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition-colors cursor-pointer text-2xs shadow-xs"
                 >
                   <Cloud className="w-3.5 h-3.5" />
-                  <span>Iniciar sesión / Sincronizar cuenta</span>
+                  <span>Iniciar sesión / Crear cuenta</span>
                 </button>
               </div>
             ) : null}
 
-            {/* 8. Instructivo y Guía Paso a Paso (Con espacio extra inferior para móvil) */}
-            <div className="space-y-1.5 pt-2 pb-10 mb-4 border-t border-slate-100 dark:border-slate-800">
+            {/* 8. Instructivo y Guía Paso a Paso */}
+            <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => {
                   setIsOpen(false);
                   onOpenOnboarding();
                 }}
-                className="w-full flex items-center justify-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-2xl font-extrabold text-xs transition-colors cursor-pointer border border-blue-200 dark:border-blue-800 shadow-2xs mb-2"
+                className="w-full flex items-center justify-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-2xl font-extrabold text-xs transition-colors cursor-pointer border border-blue-200 dark:border-blue-800 shadow-2xs"
               >
                 <HelpCircle className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span>{t.guideTutorialBtn}</span>
               </button>
+            </div>
+
+            {/* 9. Nº de Versión (Con espacio extra inferior para móvil) */}
+            <div className="pt-2 pb-10 mb-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-2xs text-slate-400 dark:text-slate-500">
+              <span className="font-semibold">NITA</span>
+              <span className="font-bold tabular-nums tracking-wide">
+                Versión {APP_VERSION}
+              </span>
             </div>
 
           </div>

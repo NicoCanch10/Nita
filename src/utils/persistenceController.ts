@@ -1,8 +1,24 @@
-import { BudgetState } from '../types/budget';
-import { saveBudgetState } from './storage';
+import { BudgetState, CategoryInfo, CurrencyCode, MonthData } from '../types/budget';
+import {
+  saveBudgetState,
+  saveGlobalCategories,
+  verifyGlobalCategoriesPersisted
+} from './storage';
 
 export type BudgetSaveFn = (
   state: BudgetState,
+  userId?: string | null,
+  isGuest?: boolean
+) => boolean;
+
+export type CategoriesSaveFn = (
+  categories: CategoryInfo[],
+  userId?: string | null,
+  isGuest?: boolean
+) => boolean;
+
+export type CategoriesVerifyFn = (
+  expectedCategories: CategoryInfo[],
   userId?: string | null,
   isGuest?: boolean
 ) => boolean;
@@ -14,6 +30,7 @@ export interface UniversalSyncParams {
   isOfflineSession: boolean;
   hasPendingSync: boolean;
   unresolvedConflictCount: number;
+  hasAuxiliaryPersistenceFailure?: boolean;
 }
 
 /**
@@ -39,6 +56,8 @@ export class LocalPersistenceController {
   private mutationVersion: number = 1;
   private lastPersistedVersion: number = 0; // 0 indicates never confirmed as written to disk
   private hasStorageFailure: boolean = false;
+  private hasConflictPersistenceFailure: boolean = false;
+  private hasCategoryPersistenceFailure: boolean = false;
   private currentUserId: string | null = null;
   private isGuest: boolean = false;
   private sessionEpoch: number = 1;
@@ -120,6 +139,8 @@ export class LocalPersistenceController {
     }
 
     this.hasStorageFailure = false;
+    this.hasConflictPersistenceFailure = false;
+    this.hasCategoryPersistenceFailure = false;
   }
 
   /**
@@ -150,7 +171,8 @@ export class LocalPersistenceController {
     version: number,
     userId?: string | null,
     isGuest: boolean = false,
-    storageVerifier?: StorageVerifierFn
+    storageVerifier?: StorageVerifierFn,
+    snapshot?: BudgetState
   ): boolean {
     if ((userId ?? null) !== this.currentUserId || isGuest !== this.isGuest) {
       console.warn('[PersistenceController] markHydrated rejected: identity mismatch');
@@ -166,6 +188,12 @@ export class LocalPersistenceController {
     this.lastPersistedVersion = version;
     this.isHydrated = true;
     this.hasStorageFailure = false;
+    if (snapshot) {
+      this.createVersionedSnapshot(snapshot, version);
+    } else {
+      this.activeFingerprint = null;
+      this.activeVersionedUnit = null;
+    }
     return true;
   }
 
@@ -210,6 +238,22 @@ export class LocalPersistenceController {
    */
   markStorageFailure(): void {
     this.hasStorageFailure = true;
+  }
+
+  setConflictPersistenceFailure(failed: boolean): void {
+    this.hasConflictPersistenceFailure = failed;
+  }
+
+  hasConflictStorageFailure(): boolean {
+    return this.hasConflictPersistenceFailure;
+  }
+
+  setCategoryPersistenceFailure(failed: boolean): void {
+    this.hasCategoryPersistenceFailure = failed;
+  }
+
+  hasCategoryStorageFailure(): boolean {
+    return this.hasCategoryPersistenceFailure;
   }
 
   /**
@@ -441,7 +485,14 @@ export class LocalPersistenceController {
     if (!params.isCloudSyncReady || !params.isOnline || params.isOfflineSession) return false;
 
     // 2. Local persistence invariants (A-1.5)
-    if (this.hasStorageFailure) return false;
+    if (
+      this.hasStorageFailure ||
+      this.hasConflictPersistenceFailure ||
+      this.hasCategoryPersistenceFailure ||
+      params.hasAuxiliaryPersistenceFailure
+    ) {
+      return false;
+    }
     if (this.lastPersistedVersion === 0) return false; // Must have confirmed local persistence
     if (this.lastPersistedVersion !== this.mutationVersion) return false; // Must match current mutation version exactly
 
@@ -464,3 +515,421 @@ export class LocalPersistenceController {
     );
   }
 }
+
+export interface InitialSyncPersistenceParams<TConflict = unknown> {
+  controller: LocalPersistenceController;
+  snapshot: BudgetState;
+  userId: string;
+  conflicts: Record<string, TConflict>;
+  storageVerifier: StorageVerifierFn;
+  saveBudgetFn?: BudgetSaveFn;
+  saveConflictsFn: (userId: string, conflicts: Record<string, TConflict>) => boolean;
+}
+
+export interface InitialSyncPersistenceResult {
+  ok: boolean;
+  budgetSaved: boolean;
+  conflictsSaved: boolean;
+  usedVersion: number;
+  mode: 'hydrated' | 'committed' | 'failed';
+}
+
+/**
+ * Coordinates local persistence during initial authoritative server confirmation in subscribeToUserMonths.
+ * - First initialization (mutationVersion === 1 and lastPersistedVersion <= 1):
+ *   persists once via saveBudgetFn and confirms version 1 with markHydrated() without duplicating commitSnapshot(v1).
+ * - Offline -> online recovery with prior local mutations (mutationVersion > 1 or lastPersistedVersion > 1):
+ *   preserves the monotonic version sequence, allocates nextVersion, and commits via commitSnapshot().
+ * - Verifies saveConflictsFn() before reporting ok = true.
+ */
+export function confirmServerInitialSyncPersistence<TConflict = unknown>(
+  params: InitialSyncPersistenceParams<TConflict>
+): InitialSyncPersistenceResult {
+  const {
+    controller,
+    snapshot,
+    userId,
+    conflicts,
+    storageVerifier,
+    saveBudgetFn = saveBudgetState,
+    saveConflictsFn,
+  } = params;
+
+  const currentMutationVersion = controller.getMutationVersion();
+  const currentLastPersisted = controller.getLastPersistedVersion();
+  const hasPriorLocalMutations = currentMutationVersion > 1 || currentLastPersisted > 1;
+
+  if (!hasPriorLocalMutations) {
+    const saveOk = saveBudgetFn(snapshot, userId, false);
+    if (!saveOk) {
+      controller.markStorageFailure();
+      return {
+        ok: false,
+        budgetSaved: false,
+        conflictsSaved: false,
+        usedVersion: currentMutationVersion,
+        mode: 'failed',
+      };
+    }
+
+    const hydratedOk = controller.markHydrated(1, userId, false, storageVerifier, snapshot);
+    if (!hydratedOk) {
+      controller.markStorageFailure();
+      return {
+        ok: false,
+        budgetSaved: false,
+        conflictsSaved: false,
+        usedVersion: currentMutationVersion,
+        mode: 'failed',
+      };
+    }
+
+    const conflictsSaved = saveConflictsFn(userId, conflicts);
+    controller.setConflictPersistenceFailure(!conflictsSaved);
+    if (!conflictsSaved) {
+      return {
+        ok: false,
+        budgetSaved: true,
+        conflictsSaved: false,
+        usedVersion: 1,
+        mode: 'failed',
+      };
+    }
+
+    return {
+      ok: true,
+      budgetSaved: true,
+      conflictsSaved: true,
+      usedVersion: 1,
+      mode: 'hydrated',
+    };
+  }
+
+  const nextVersion = controller.incrementMutationVersion(snapshot);
+  const unit = controller.getActiveVersionedSnapshot() || controller.createVersionedSnapshot(snapshot, nextVersion);
+  const commitOk = controller.commitSnapshot(unit, saveBudgetFn);
+  if (!commitOk) {
+    return {
+      ok: false,
+      budgetSaved: false,
+      conflictsSaved: false,
+      usedVersion: nextVersion,
+      mode: 'failed',
+    };
+  }
+
+  const conflictsSaved = saveConflictsFn(userId, conflicts);
+  controller.setConflictPersistenceFailure(!conflictsSaved);
+  if (!conflictsSaved) {
+    return {
+      ok: false,
+      budgetSaved: true,
+      conflictsSaved: false,
+      usedVersion: nextVersion,
+      mode: 'failed',
+    };
+  }
+
+  return {
+    ok: true,
+    budgetSaved: true,
+    conflictsSaved: true,
+    usedVersion: nextVersion,
+    mode: 'committed',
+  };
+}
+
+export interface ManualSyncMergeParams {
+  controller: LocalPersistenceController;
+  userId: string;
+  currentKey: string;
+  currentMonths: Record<string, MonthData>;
+  recoveredMonths: Record<string, MonthData>;
+  month: number;
+  year: number;
+  currency: CurrencyCode;
+  areEqualFn: (a: MonthData | null | undefined, b: MonthData | null | undefined) => boolean;
+  mergeFn: (target?: MonthData | null, source?: MonthData | null) => MonthData;
+  hasContentFn: (data?: MonthData | null) => boolean;
+  saveBudgetFn?: BudgetSaveFn;
+  enqueuePendingFn: (
+    userId: string,
+    monthKey: string,
+    year: number,
+    month: number,
+    data: MonthData,
+    opId?: string
+  ) => string | null;
+  generateOpIdFn: () => string;
+}
+
+export interface ManualSyncMergeResult {
+  hasChanges: boolean;
+  localSaved: boolean;
+  nextMonths: Record<string, MonthData>;
+  changedKeys: string[];
+  enqueuedOps: Record<string, string>;
+  targetVersion: number;
+}
+
+/**
+ * Merges recovered local data sources for manual sync without unnecessary writes or version increments.
+ * When changes exist, increments mutationVersion, persists locally through LocalPersistenceController,
+ * and enqueues pending month operations so Firestore failures never lose merged state.
+ */
+export function mergeAndPersistManualSync(params: ManualSyncMergeParams): ManualSyncMergeResult {
+  const {
+    controller,
+    userId,
+    currentKey,
+    currentMonths,
+    recoveredMonths,
+    month,
+    year,
+    currency,
+    areEqualFn,
+    mergeFn,
+    hasContentFn,
+    saveBudgetFn = saveBudgetState,
+    enqueuePendingFn,
+    generateOpIdFn,
+  } = params;
+
+  const nextMonths: Record<string, MonthData> = { ...currentMonths };
+  const changedKeys: string[] = [];
+
+  for (const [mKey, mData] of Object.entries(recoveredMonths)) {
+    if (!mData || (!hasContentFn(mData) && mKey !== currentKey)) continue;
+    const prev = nextMonths[mKey];
+    const merged = prev ? mergeFn(prev, mData) : mData;
+    if (!prev || !areEqualFn(prev, merged)) {
+      nextMonths[mKey] = merged;
+      changedKeys.push(mKey);
+    }
+  }
+
+  if (changedKeys.length === 0) {
+    return {
+      hasChanges: false,
+      localSaved: true,
+      nextMonths: currentMonths,
+      changedKeys: [],
+      enqueuedOps: {},
+      targetVersion: controller.getMutationVersion(),
+    };
+  }
+
+  const snapshot: BudgetState = {
+    month,
+    year,
+    currency,
+    monthsData: nextMonths,
+  };
+  const targetVersion = controller.incrementMutationVersion(snapshot);
+  const unit = controller.getActiveVersionedSnapshot() || controller.createVersionedSnapshot(snapshot, targetVersion);
+  const localSaved = controller.commitSnapshot(unit, saveBudgetFn);
+
+  if (!localSaved) {
+    return {
+      hasChanges: true,
+      localSaved: false,
+      nextMonths,
+      changedKeys,
+      enqueuedOps: {},
+      targetVersion,
+    };
+  }
+
+  const enqueuedOps: Record<string, string> = {};
+  for (const mKey of changedKeys) {
+    const [yStr, moStr] = mKey.split('-');
+    const parsedY = parseInt(yStr, 10);
+    const parsedM = parseInt(moStr, 10) - 1;
+    const mYear = !isNaN(parsedY) ? parsedY : year;
+    const mMonth = !isNaN(parsedM) ? parsedM : month;
+    const opId = generateOpIdFn();
+    const persistedOpId = enqueuePendingFn(userId, mKey, mYear, mMonth, nextMonths[mKey], opId);
+    if (persistedOpId) {
+      enqueuedOps[mKey] = persistedOpId;
+    }
+  }
+
+  return {
+    hasChanges: true,
+    localSaved: true,
+    nextMonths,
+    changedKeys,
+    enqueuedOps,
+    targetVersion,
+  };
+}
+
+export interface PostInitMonthsUpdateParams<TConflict = unknown> {
+  controller: LocalPersistenceController;
+  userId: string;
+  updatedMonths: Record<string, MonthData>;
+  updatedConflicts: Record<string, TConflict>;
+  month: number;
+  year: number;
+  currency: CurrencyCode;
+  saveBudgetFn?: BudgetSaveFn;
+  saveConflictsFn: (userId: string, conflicts: Record<string, TConflict>) => boolean;
+  onConflictsPersisted?: (conflicts: Record<string, TConflict>) => void;
+}
+
+export interface PostInitMonthsUpdateResult {
+  ok: boolean;
+  conflictsSaved: boolean;
+  budgetSaved: boolean;
+  usedVersion: number;
+}
+
+/**
+ * Coordinates conflict and month persistence for post-initialization remote snapshots.
+ * Guarantees that conflicts and budget state in memory are NEVER updated unless saveConflictsFn succeeds first.
+ */
+export function applyPostInitMonthsPersistence<TConflict = unknown>(
+  params: PostInitMonthsUpdateParams<TConflict>
+): PostInitMonthsUpdateResult {
+  const {
+    controller,
+    userId,
+    updatedMonths,
+    updatedConflicts,
+    month,
+    year,
+    currency,
+    saveBudgetFn = saveBudgetState,
+    saveConflictsFn,
+    onConflictsPersisted,
+  } = params;
+
+  const conflictsSaved = saveConflictsFn(userId, updatedConflicts);
+  if (!conflictsSaved) {
+    controller.setConflictPersistenceFailure(true);
+    return {
+      ok: false,
+      conflictsSaved: false,
+      budgetSaved: false,
+      usedVersion: controller.getMutationVersion(),
+    };
+  }
+
+  controller.setConflictPersistenceFailure(false);
+  if (onConflictsPersisted) {
+    onConflictsPersisted(updatedConflicts);
+  }
+
+  const snapshot: BudgetState = {
+    month,
+    year,
+    currency,
+    monthsData: updatedMonths,
+  };
+  const targetVersion = controller.incrementMutationVersion(snapshot);
+  const unit = controller.getActiveVersionedSnapshot() || controller.createVersionedSnapshot(snapshot, targetVersion);
+  const budgetSaved = controller.commitSnapshot(unit, saveBudgetFn);
+
+  return {
+    ok: budgetSaved,
+    conflictsSaved: true,
+    budgetSaved,
+    usedVersion: targetVersion,
+  };
+}
+
+export interface RemoteGlobalCategoriesParams {
+  controller: LocalPersistenceController;
+  userId: string;
+  remoteCats: CategoryInfo[];
+  currentMonths: Record<string, MonthData>;
+  month: number;
+  year: number;
+  currency: CurrencyCode;
+  saveCategoriesFn?: CategoriesSaveFn;
+  verifyCategoriesFn?: CategoriesVerifyFn;
+  saveBudgetFn?: BudgetSaveFn;
+}
+
+export interface RemoteGlobalCategoriesResult {
+  ok: boolean;
+  categoriesSaved: boolean;
+  budgetSaved: boolean;
+  nextMonths: Record<string, MonthData>;
+  usedVersion: number;
+}
+
+/**
+ * Persists and verifies incoming remote global categories (including []) BEFORE updating month snapshots or React state.
+ * Prevents stale storage keys from causing false positives if the write fails.
+ */
+export function applyRemoteGlobalCategoriesPersistence(
+  params: RemoteGlobalCategoriesParams
+): RemoteGlobalCategoriesResult {
+  const {
+    controller,
+    userId,
+    remoteCats,
+    currentMonths,
+    month,
+    year,
+    currency,
+    saveCategoriesFn = saveGlobalCategories,
+    verifyCategoriesFn = verifyGlobalCategoriesPersisted,
+    saveBudgetFn = saveBudgetState,
+  } = params;
+
+  const updatedMap: Record<string, MonthData> = {};
+  Object.keys(currentMonths).forEach(key => {
+    const mData = currentMonths[key];
+    if (mData) {
+      updatedMap[key] = { ...mData, categories: [...remoteCats] };
+    }
+  });
+
+  const written = saveCategoriesFn(remoteCats, userId, false);
+  const verified = written && verifyCategoriesFn(remoteCats, userId, false);
+
+  if (!verified) {
+    controller.setCategoryPersistenceFailure(true);
+    return {
+      ok: false,
+      categoriesSaved: false,
+      budgetSaved: false,
+      nextMonths: currentMonths,
+      usedVersion: controller.getMutationVersion(),
+    };
+  }
+
+  controller.setCategoryPersistenceFailure(false);
+
+  const snapshot: BudgetState = {
+    month,
+    year,
+    currency,
+    monthsData: updatedMap,
+  };
+  const targetVersion = controller.incrementMutationVersion(snapshot);
+  const unit = controller.getActiveVersionedSnapshot() || controller.createVersionedSnapshot(snapshot, targetVersion);
+  const budgetSaved = controller.commitSnapshot(unit, saveBudgetFn);
+
+  if (!budgetSaved) {
+    return {
+      ok: false,
+      categoriesSaved: true,
+      budgetSaved: false,
+      nextMonths: currentMonths,
+      usedVersion: targetVersion,
+    };
+  }
+
+  return {
+    ok: true,
+    categoriesSaved: true,
+    budgetSaved: true,
+    nextMonths: updatedMap,
+    usedVersion: targetVersion,
+  };
+}
+
+

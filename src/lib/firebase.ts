@@ -1,11 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, 
-  GoogleAuthProvider, 
-  OAuthProvider, 
-  signInWithPopup, 
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut, 
-  linkWithPopup, 
   User,
   setPersistence,
   browserLocalPersistence,
@@ -45,7 +43,13 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // Initialize single Firebase Auth instance
 export const auth = getAuth(app);
 
-// Explicitly configure browserLocalPersistence to ensure Google session survives reloads, app restarts and device reboots
+// Explicitly configure browserLocalPersistence immediately to ensure Google session survives reloads, app restarts and device reboots
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.warn('[Firebase Auth] Immediate browserLocalPersistence initialization warning:', err);
+  });
+}
+
 let persistenceInitPromise: Promise<void> | null = null;
 
 export function ensureAuthPersistence(): Promise<void> {
@@ -166,35 +170,15 @@ export async function testConnection(): Promise<void> {
   }
 }
 
-// Providers
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
-googleProvider.addScope('email');
-googleProvider.addScope('profile');
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account',
+});
 
-export const appleProvider = new OAuthProvider('apple.com');
-appleProvider.addScope('email');
-appleProvider.addScope('name');
-
-// Auth actions: synchronous user gesture execution for reliable popup authorization across all browsers
-export function signInWithGoogle() {
-  ensureAuthPersistence().catch(() => {});
-  return signInWithPopup(auth, googleProvider);
-}
-
-export async function signInWithApple() {
-  ensureAuthPersistence().catch(() => {});
-  return await signInWithPopup(auth, appleProvider);
-}
-
-export async function linkGoogle(user: User) {
+export async function signInWithGoogle(): Promise<User> {
   await ensureAuthPersistence();
-  return await linkWithPopup(user, googleProvider);
-}
-
-export async function linkApple(user: User) {
-  await ensureAuthPersistence();
-  return await linkWithPopup(user, appleProvider);
+  const result = await signInWithPopup(auth, googleProvider);
+  return result.user;
 }
 
 export async function logOut() {

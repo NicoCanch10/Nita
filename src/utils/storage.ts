@@ -249,6 +249,50 @@ export function hasPendingSync(userId: string): boolean {
   return getPendingSyncQueue(userId).length > 0;
 }
 
+export function areCategoryListsEqual(
+  a: CategoryInfo[] | null | undefined,
+  b: CategoryInfo[] | null | undefined
+): boolean {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const ca = a[i];
+    const cb = b[i];
+    if (
+      !ca ||
+      !cb ||
+      ca.id !== cb.id ||
+      ca.label !== cb.label ||
+      ca.color !== cb.color ||
+      Boolean(ca.isCustom) !== Boolean(cb.isCustom) ||
+      (ca.badgeBg ?? '') !== (cb.badgeBg ?? '') ||
+      (ca.badgeText ?? '') !== (cb.badgeText ?? '')
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function verifyGlobalCategoriesPersisted(
+  expectedCategories: CategoryInfo[],
+  userId?: string | null,
+  isGuest?: boolean
+): boolean {
+  try {
+    if (!Array.isArray(expectedCategories)) return false;
+    const { categoriesKey } = resolveStorageKeys(userId, isGuest);
+    if (!categoriesKey) return false;
+    const raw = localStorage.getItem(categoriesKey);
+    if (raw === null) return false;
+    const parsed = JSON.parse(raw);
+    return areCategoryListsEqual(parsed, expectedCategories);
+  } catch {
+    return false;
+  }
+}
+
 export function loadGlobalCategories(userId?: string | null, isGuest?: boolean): CategoryInfo[] {
   try {
     const { categoriesKey } = resolveStorageKeys(userId, isGuest);
@@ -256,7 +300,7 @@ export function loadGlobalCategories(userId?: string | null, isGuest?: boolean):
       const raw = localStorage.getItem(categoriesKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           return parsed;
         }
       }
@@ -271,13 +315,20 @@ export function saveGlobalCategories(
   categories: CategoryInfo[], 
   userId?: string | null, 
   isGuest?: boolean
-): void {
+): boolean {
   try {
     const { categoriesKey } = resolveStorageKeys(userId, isGuest);
-    if (!categoriesKey) return;
-    localStorage.setItem(categoriesKey, JSON.stringify(categories));
+    if (!categoriesKey) return false;
+    if (!Array.isArray(categories)) return false;
+    const serialized = JSON.stringify(categories);
+    localStorage.setItem(categoriesKey, serialized);
+    const verifiedRaw = localStorage.getItem(categoriesKey);
+    if (verifiedRaw === null) return false;
+    const parsed = JSON.parse(verifiedRaw);
+    return areCategoryListsEqual(parsed, categories);
   } catch (error) {
     console.error('Error saving global categories to localStorage', error);
+    return false;
   }
 }
 

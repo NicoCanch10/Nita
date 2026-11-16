@@ -38,7 +38,8 @@ import {
   getPendingSyncQueue,
   mergeMonthData,
   recoverLocalDataSources,
-  hasRealUserContent
+  hasRealUserContent,
+  resolveStorageKeys
 } from './utils/storage';
 import { useTheme } from './hooks/useTheme';
 import { usePWAUpdate } from './hooks/usePWAUpdate';
@@ -55,13 +56,18 @@ import { DueDateAlertSettings, loadAlertSettings } from './utils/notifications';
 import { loadSelectedLanguage, saveSelectedLanguage, getTranslations } from './utils/languages';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
-import { LocalPersistenceController } from './utils/persistenceController';
+import {
+  LocalPersistenceController,
+  confirmServerInitialSyncPersistence,
+  mergeAndPersistManualSync,
+  applyPostInitMonthsPersistence,
+  applyRemoteGlobalCategoriesPersistence
+} from './utils/persistenceController';
 import { 
   saveMonthToFirestoreSerialized,
   saveGlobalCategoriesToFirestore,
   saveUserPreferencesToFirestore,
   subscribeToUserMonths,
-  subscribeToUserMonth,
   subscribeToGlobalCategories,
   subscribeToUserProfile,
   processPendingSyncQueue,
@@ -212,9 +218,9 @@ function MainApp() {
 
   const verifyStorageExists = useCallback((uId?: string | null, guest?: boolean): boolean => {
     if (typeof localStorage === 'undefined') return false;
-    const key = guest ? 'nita_guest_data' : (uId ? `nita_user_data_${uId}` : null);
-    if (!key) return false;
-    const raw = localStorage.getItem(key);
+    const { dataKey } = resolveStorageKeys(uId, guest);
+    if (!dataKey) return false;
+    const raw = localStorage.getItem(dataKey);
     return Boolean(raw && raw.length > 5);
   }, []);
 
@@ -222,8 +228,8 @@ function MainApp() {
   const persistenceControllerRef = useRef<LocalPersistenceController>(
     (() => {
       const effectiveUid = user?.uid || (!isGuestMode ? getStoredUserId() : undefined);
-      const storageKey = isGuestMode ? 'nita_guest_data' : (effectiveUid ? `nita_user_data_${effectiveUid}` : null);
-      const hasRecord = Boolean(storageKey && typeof localStorage !== 'undefined' && localStorage.getItem(storageKey));
+      const { dataKey } = resolveStorageKeys(effectiveUid, isGuestMode);
+      const hasRecord = Boolean(dataKey && typeof localStorage !== 'undefined' && localStorage.getItem(dataKey));
       return new LocalPersistenceController(effectiveUid, isGuestMode, hasRecord);
     })()
   );
@@ -269,9 +275,15 @@ function MainApp() {
   // Reiniciar estado del controlador ante cambio de usuario o cambio de modo invitado
   useEffect(() => {
     const effectiveUid = user?.uid;
-    const storageKey = isGuestMode ? 'nita_guest_data' : (effectiveUid ? `nita_user_data_${effectiveUid}` : null);
-    const hasRecord = Boolean(storageKey && typeof localStorage !== 'undefined' && localStorage.getItem(storageKey));
-    persistenceControllerRef.current.reset(effectiveUid, isGuestMode, hasRecord, verifyStorageExists);
+    const controller = persistenceControllerRef.current;
+    if (
+      controller.getCurrentUserId() !== (effectiveUid ?? null) ||
+      controller.getIsGuest() !== isGuestMode
+    ) {
+      const { dataKey } = resolveStorageKeys(effectiveUid, isGuestMode);
+      const hasRecord = Boolean(dataKey && typeof localStorage !== 'undefined' && localStorage.getItem(dataKey));
+      controller.reset(effectiveUid, isGuestMode, hasRecord, verifyStorageExists);
+    }
   }, [user?.uid, isGuestMode, verifyStorageExists]);
 
   // Si se inicializó con datos predeterminados (no hidratados), persistirlos explícitamente
@@ -343,186 +355,276 @@ function MainApp() {
     }
 
     if (!isOnline || isOfflineSession) {
-      setIsCloudSyncReady(true);
+      setIsCloudSyncReady(false);
       setSyncStatus('offline');
       return;
     }
 
     if (!isFirebaseAuthActive) {
-      setIsCloudSyncReady(true);
+      setIsCloudSyncReady(false);
       setSyncStatus('unauthenticated');
       return;
     }
 
     let isMounted = true;
-    let isInitialSnapshot = true;
+    let isServerConfirmedInitDone = false;
     setIsCloudSyncReady(false);
     isCloudSyncReadyRef.current = false;
     setSyncStatus('syncing');
 
-    // 1. Real-time subscription to /users/{userId}/months collection
-    const unsubMonths = subscribeToUserMonths(user.uid, (remoteMonths, hasPendingWrites) => {
-      if (!isMounted) return;
+    // 1. Suscripción en tiempo real a la colección completa /users/{userId}/months
+    const unsubMonths = subscribeToUserMonths(
+      user.uid,
+      (remoteMonths, hasPendingWrites, fromCache) => {
+        if (!isMounted) return;
 
-      // If this device originated the write (hasPendingWrites === true), local state is already up to date
-      if (hasPendingWrites && !isInitialSnapshot) {
-        return;
-      }
-
-      isRemoteSyncRef.current = true;
-
-      // Clear previous conflicts descriptor to impact live changes directly without banners
-      if (remoteMonths && Object.keys(remoteMonths).length > 0) {
-        Object.keys(remoteMonths).forEach(mKey => {
-          clearPendingConflict(user.uid, mKey);
-        });
-        unresolvedConflictsRef.current = {};
-        setActiveConflicts({});
-        savePendingConflicts(user.uid, {});
-      }
-
-      if (isInitialSnapshot) {
-        isInitialSnapshot = false;
-
-        // On first snapshot: recover all persistent local data entered offline on this device
-        const recoveredLocal = recoverLocalDataSources(user.uid);
-        let finalMonths: Record<string, MonthData> = { ...remoteMonths };
-
-        for (const [mKey, rData] of Object.entries(recoveredLocal)) {
-          if (rData && hasRealUserContent(rData)) {
-            finalMonths[mKey] = finalMonths[mKey] ? mergeMonthData(finalMonths[mKey], rData) : rData;
+        // No aceptar el primer snapshot como base definitiva si fromCache === true.
+        // Tampoco aceptar como base definitiva un snapshot con hasPendingWrites === true.
+        // Esperar un snapshot confirmado por el servidor y sin escrituras pendientes.
+        // No marcar la inicialización como completada antes de esa confirmación.
+        // No subir información local basándose en una lectura de caché.
+        if (!isServerConfirmedInitDone) {
+          if (fromCache || hasPendingWrites) {
+            setSyncStatus('syncing');
+            return;
           }
+        } else if (hasPendingWrites) {
+          // Si este dispositivo originó la escritura local en vuelo, esperar confirmación del servidor
+          return;
         }
 
-        // Upload any unsaved local months to Google Cloud Firestore (/users/{userId}/months/{monthKey})
-        const monthsToUpload: Record<string, MonthData> = {};
-        for (const [mKey, mData] of Object.entries(finalMonths)) {
-          if (mData && hasRealUserContent(mData)) {
-            const remoteM = remoteMonths[mKey];
-            if (!remoteM || !areMonthDataEqual(mData, remoteM)) {
-              monthsToUpload[mKey] = mData;
+        // Primera confirmación autoritativa del servidor (fromCache === false && hasPendingWrites === false)
+        if (!isServerConfirmedInitDone) {
+          const pendingItems = getPendingSyncQueue(user.uid);
+          const pendingMonthMap = new Map<string, MonthData>();
+          for (const item of pendingItems) {
+            if (item.type === 'month' && item.monthKey && item.data) {
+              pendingMonthMap.set(item.monthKey, item.data);
             }
           }
-        }
+          const pendingMonthKeys = new Set(pendingMonthMap.keys());
 
-        if (Object.keys(monthsToUpload).length > 0) {
-          Object.entries(monthsToUpload).forEach(([mKey, mData]) => {
-            const [yStr, moStr] = mKey.split('-');
-            const parsedY = parseInt(yStr, 10);
-            const parsedM = parseInt(moStr, 10) - 1;
-            const y = !isNaN(parsedY) ? parsedY : new Date().getFullYear();
-            const m = !isNaN(parsedM) ? parsedM : new Date().getMonth();
-            saveMonthToFirestoreSerialized(user.uid, mKey, y, m, mData)
-              .catch(err => {
-                console.warn(`[LiveSync] Subida en segundo plano para ${mKey}:`, err);
-                enqueuePendingMonth(user.uid, mKey, y, m, mData, generateOpId());
-              });
+          // 1. Base autoritativa: datos confirmados existentes en Firestore
+          const finalMonths: Record<string, MonthData> = { ...remoteMonths };
+          const nextConflicts: Record<string, MonthConflictInfo> = { ...unresolvedConflictsRef.current };
+
+          // 1b. Proteger meses que ya tienen conflictos sin resolver
+          for (const [cKey, conflict] of Object.entries(nextConflicts)) {
+            if (conflict && hasRealUserContent(conflict.local)) {
+              finalMonths[cKey] = latestMonthsDataRef.current[cKey] || conflict.local;
+              if (remoteMonths[cKey] && conflict.remote !== remoteMonths[cKey]) {
+                nextConflicts[cKey] = {
+                  ...conflict,
+                  remote: remoteMonths[cKey],
+                };
+              }
+            }
+          }
+
+          // 2. Meses locales con operaciones pendientes
+          // 3. Meses locales que realmente no existen en Firestore y deben sincronizarse
+          const hasInSessionLocalMutations = persistenceControllerRef.current.getMutationVersion() > 1;
+          const recoveredLocal = recoverLocalDataSources(user.uid);
+          const newlyDiscoveredToEnqueue: Array<{ key: string; y: number; m: number; data: MonthData }> = [];
+
+          for (const [mKey, rData] of Object.entries(recoveredLocal)) {
+            if (!rData) continue;
+            if (pendingMonthKeys.has(mKey)) {
+              // Mes local con operaciones pendientes: preservar cambios locales en vuelo
+              finalMonths[mKey] =
+                hasInSessionLocalMutations && latestMonthsDataRef.current[mKey]
+                  ? latestMonthsDataRef.current[mKey]
+                  : pendingMonthMap.get(mKey) || rData;
+            } else if (!finalMonths[mKey] && hasRealUserContent(rData)) {
+              // Mes local que realmente NO existe en Firestore: debe sincronizarse
+              finalMonths[mKey] = rData;
+              const [yStr, moStr] = mKey.split('-');
+              const parsedY = parseInt(yStr, 10);
+              const parsedM = parseInt(moStr, 10) - 1;
+              const y = !isNaN(parsedY) ? parsedY : new Date().getFullYear();
+              const m = !isNaN(parsedM) ? parsedM : new Date().getMonth();
+              newlyDiscoveredToEnqueue.push({ key: mKey, y, m, data: rData });
+            }
+          }
+
+          // Proteger modificaciones locales realizadas offline en esta sesión si no figuraban en cola
+          if (hasInSessionLocalMutations) {
+            for (const [mKey, localMonth] of Object.entries(latestMonthsDataRef.current)) {
+              if (!localMonth || pendingMonthKeys.has(mKey) || nextConflicts[mKey]) continue;
+              const remoteMonth = remoteMonths[mKey];
+              if (!remoteMonth) {
+                if (hasRealUserContent(localMonth)) {
+                  finalMonths[mKey] = localMonth;
+                  const [yStr, moStr] = mKey.split('-');
+                  const parsedY = parseInt(yStr, 10);
+                  const parsedM = parseInt(moStr, 10) - 1;
+                  const y = !isNaN(parsedY) ? parsedY : yearRef.current;
+                  const m = !isNaN(parsedM) ? parsedM : monthRef.current;
+                  if (!newlyDiscoveredToEnqueue.some(i => i.key === mKey)) {
+                    newlyDiscoveredToEnqueue.push({ key: mKey, y, m, data: localMonth });
+                  }
+                }
+              } else if (hasRealUserContent(localMonth) && !areMonthDataEqual(localMonth, remoteMonth)) {
+                nextConflicts[mKey] = {
+                  local: localMonth,
+                  remote: remoteMonth,
+                  reason: 'orphan_local_divergence',
+                  detectedAt: new Date().toISOString(),
+                };
+                finalMonths[mKey] = localMonth;
+              }
+            }
+          }
+
+          // Incorporar a la cola de sincronización las subidas iniciales de meses locales que no existían
+          for (const item of newlyDiscoveredToEnqueue) {
+            enqueuePendingMonth(user.uid, item.key, item.y, item.m, item.data, generateOpId());
+          }
+
+          const initialSnapshot: BudgetState = {
+            month: monthRef.current,
+            year: yearRef.current,
+            currency: currencyRef.current,
+            monthsData: finalMonths,
+          };
+
+          const initPersistRes = confirmServerInitialSyncPersistence({
+            controller: persistenceControllerRef.current,
+            snapshot: initialSnapshot,
+            userId: user.uid,
+            conflicts: nextConflicts,
+            storageVerifier: verifyStorageExists,
+            saveBudgetFn: saveBudgetState,
+            saveConflictsFn: savePendingConflicts,
           });
-        }
 
-        saveBudgetState({
-          month: monthRef.current,
-          year: yearRef.current,
-          currency: currencyRef.current,
-          monthsData: finalMonths,
-        }, user.uid, false);
+          if (!initPersistRes.ok) {
+            setSyncStatus('error');
+            return;
+          }
 
-        setMonthsData(finalMonths);
-        latestMonthsDataRef.current = finalMonths;
-        setIsCloudSyncReady(true);
-        isCloudSyncReadyRef.current = true;
+          // Persistencia local y conflictos confirmados: actualizar estado de React
+          isServerConfirmedInitDone = true;
+          isRemoteSyncRef.current = true;
+          unresolvedConflictsRef.current = nextConflicts;
+          setActiveConflicts(nextConflicts);
+          setMonthsData(finalMonths);
+          latestMonthsDataRef.current = finalMonths;
+          setIsCloudSyncReady(true);
+          isCloudSyncReadyRef.current = true;
 
-        persistenceControllerRef.current.markHydrated(1, user.uid, false, verifyStorageExists);
-        const syncedSnapshot: BudgetState = {
-          month: monthRef.current,
-          year: yearRef.current,
-          currency: currencyRef.current,
-          monthsData: finalMonths,
-        };
-        persistenceControllerRef.current.createVersionedSnapshot(syncedSnapshot, 1);
+          // Procesar cola pendiente si hubiese (incluyendo las subidas encoladas)
+          const queue = getPendingSyncQueue(user.uid);
+          if (queue.length > 0) {
+            setSyncStatus('syncing');
+            processPendingSyncQueue(user.uid).then(() => {
+              if (!isMounted) return;
+              const canSync = canDeclareSyncedHelperRef.current();
+              setSyncStatus(canSync ? 'synced' : 'error');
+            }).catch(() => {
+              if (!isMounted) return;
+              setSyncStatus('error');
+            });
+          } else {
+            const canSync = canDeclareSyncedHelperRef.current();
+            setSyncStatus(canSync ? 'synced' : 'error');
+          }
+        } else {
+          // Actualizaciones en tiempo real posteriores confirmadas por el servidor
+          const currentMonths = latestMonthsDataRef.current;
+          // Se pasan los conflictos reales de unresolvedConflictsRef.current, NO {}
+          const { updatedMonths, updatedConflicts } = processRemoteMonthsSnapshot(
+            remoteMonths,
+            currentMonths,
+            unresolvedConflictsRef.current,
+            pendingExpenseIdsRef.current,
+            pendingFixedIdsRef.current,
+            deletedExpenseIdsRef.current,
+            deletedFixedIdsRef.current,
+            modifiedFixedIdsRef.current,
+            user.uid
+          );
 
-        const canSync = persistenceControllerRef.current.canDeclareSynced({
-          userId: user.uid,
-          isCloudSyncReady: true,
-          isOnline,
-          isOfflineSession,
-          hasPendingSync: hasPendingSync(user.uid),
-          unresolvedConflictCount: 0,
-        });
-        setSyncStatus(canSync ? 'synced' : 'error');
-      } else {
-        // Subsequent live updates from other devices with the same Google account
-        const currentMonths = latestMonthsDataRef.current;
-        const { updatedMonths } = processRemoteMonthsSnapshot(
-          remoteMonths,
-          currentMonths,
-          {},
-          pendingExpenseIdsRef.current,
-          pendingFixedIdsRef.current,
-          deletedExpenseIdsRef.current,
-          deletedFixedIdsRef.current,
-          modifiedFixedIdsRef.current,
-          user.uid
-        );
+          // Procesar y conservar updatedConflicts; guardar en localStorage ANTES de actualizar refs/estado activo
+          const postInitRes = applyPostInitMonthsPersistence<MonthConflictInfo>({
+            controller: persistenceControllerRef.current,
+            userId: user.uid,
+            updatedMonths,
+            updatedConflicts,
+            month: monthRef.current,
+            year: yearRef.current,
+            currency: currencyRef.current,
+            saveBudgetFn: saveBudgetState,
+            saveConflictsFn: savePendingConflicts,
+            onConflictsPersisted: (persistedConflicts) => {
+              unresolvedConflictsRef.current = persistedConflicts;
+              setActiveConflicts(persistedConflicts);
+            },
+          });
 
-        const targetVersion = persistenceControllerRef.current.incrementMutationVersion();
-        const budgetSaved = commitBudgetSnapshot(updatedMonths, targetVersion);
+          if (!postInitRes.conflictsSaved || !postInitRes.ok) {
+            setSyncStatus('error');
+            return;
+          }
 
-        if (budgetSaved) {
+          isRemoteSyncRef.current = true;
           latestMonthsDataRef.current = updatedMonths;
           setMonthsData(updatedMonths);
+          setSyncStatus(canDeclareSyncedHelperRef.current() ? 'synced' : 'error');
+        }
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.error('[Firestore Error en suscripción de meses]:', error);
+        setIsCloudSyncReady(false);
+        isCloudSyncReadyRef.current = false;
+        setSyncStatus('error');
+      }
+    );
+
+    // 2. Suscripción en tiempo real a /users/{userId}/categories/global (única ruta autoritativa de categorías)
+    const unsubCategories = subscribeToGlobalCategories(
+      user.uid,
+      (remoteCats, fromCache) => {
+        if (!isMounted) return;
+        // La suscripción de categorías no debe modificar el estado antes de recibir la primera confirmación autoritativa de meses.
+        if (!isCloudSyncReadyRef.current) return;
+        // No procesar snapshots provenientes únicamente de caché durante la inicialización
+        if (fromCache) return;
+
+        // No borrar categorías locales que tengan operaciones pendientes de sincronización
+        const queue = getPendingSyncQueue(user.uid);
+        const hasPendingCategories = queue.some(item => item.type === 'categories');
+        if (hasPendingCategories) {
+          return;
+        }
+
+        const catRes = applyRemoteGlobalCategoriesPersistence({
+          controller: persistenceControllerRef.current,
+          userId: user.uid,
+          remoteCats,
+          currentMonths: latestMonthsDataRef.current,
+          month: monthRef.current,
+          year: yearRef.current,
+          currency: currencyRef.current,
+        });
+
+        if (catRes.ok) {
+          isRemoteSyncRef.current = true;
+          latestMonthsDataRef.current = catRes.nextMonths;
+          setMonthsData(catRes.nextMonths);
           setSyncStatus(canDeclareSyncedHelperRef.current() ? 'synced' : 'error');
         } else {
           setSyncStatus('error');
         }
+      },
+      (error) => {
+        if (!isMounted) return;
+        console.warn('[Firestore Error en categorías]:', error);
       }
-    });
+    );
 
-    // 2. Real-time subscription to /users/{userId}/categories/global
-    const unsubCategories = subscribeToGlobalCategories(user.uid, (remoteCats) => {
-      if (!isMounted) return;
-      if (remoteCats && remoteCats.length > 0) {
-        saveGlobalCategories(remoteCats, user.uid, false);
-        const currentMap = latestMonthsDataRef.current;
-        let hasChanges = false;
-        const updatedMap: Record<string, MonthData> = {};
-
-        Object.keys(currentMap).forEach(key => {
-          const mData = currentMap[key];
-          if (mData) {
-            const currentCats = [...mData.categories];
-            let monthChanged = false;
-            remoteCats.forEach(rCat => {
-              const idx = currentCats.findIndex(c => c.id === rCat.id);
-              if (idx >= 0) {
-                if (currentCats[idx].label !== rCat.label || currentCats[idx].color !== rCat.color) {
-                  currentCats[idx] = { ...currentCats[idx], label: rCat.label, color: rCat.color };
-                  monthChanged = true;
-                }
-              } else {
-                currentCats.push({ ...rCat });
-                monthChanged = true;
-              }
-            });
-            if (monthChanged) {
-              hasChanges = true;
-              updatedMap[key] = { ...mData, categories: currentCats };
-            } else {
-              updatedMap[key] = mData;
-            }
-          }
-        });
-
-        if (hasChanges) {
-          const targetVersion = persistenceControllerRef.current.incrementMutationVersion();
-          latestMonthsDataRef.current = updatedMap;
-          setMonthsData(updatedMap);
-          commitBudgetSnapshot(updatedMap, targetVersion);
-        }
-      }
-    });
-
-    // 3. Real-time subscription to /users/{userId} profile document
+    // 3. Suscripción en tiempo real al documento de perfil /users/{userId} (moneda, idioma)
     const unsubProfile = subscribeToUserProfile(user.uid, (profile) => {
       if (!isMounted) return;
       let currencyChanged = false;
@@ -544,29 +646,29 @@ function MainApp() {
       }
     });
 
-    // 4. Real-time subscription to active month document /users/{userId}/months/{currentKey}
-    const unsubActiveMonth = subscribeToUserMonth(user.uid, currentKey, (monthData, hasPendingWrites) => {
-      if (!isMounted || hasPendingWrites || !monthData) return;
-      const current = latestMonthsDataRef.current[currentKey];
-      if (!current || !areMonthDataEqual(current, monthData)) {
-        const merged = current ? mergeMonthData(current, monthData) : monthData;
-        const updated = { ...latestMonthsDataRef.current, [currentKey]: merged };
-        latestMonthsDataRef.current = updated;
-        setMonthsData(updated);
-        const targetVersion = persistenceControllerRef.current.incrementMutationVersion();
-        commitBudgetSnapshot(updated, targetVersion);
-      }
-    });
-
     // Cancela y limpia todas las suscripciones de Firestore al desmontar para evitar fugas de memoria
     return () => {
       isMounted = false;
       unsubMonths();
       unsubCategories();
       unsubProfile();
-      unsubActiveMonth();
     };
-  }, [user?.uid, isOnline, isOfflineSession, isFirebaseAuthActive, currentKey]);
+  }, [user?.uid, isOnline, isOfflineSession, isFirebaseAuthActive]);
+
+  // Auto-sincronización instantánea al desbloquear el teléfono o regresar a la pestaña
+  useEffect(() => {
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && user && isFirebaseAuthActive && isOnline && !isOfflineSession) {
+        processPendingSyncQueue(user.uid).catch(() => {});
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [user?.uid, isFirebaseAuthActive, isOnline, isOfflineSession]);
 
   // Sincronizar estado local en memoria ante cambio de identidad (usuario autenticado o invitado)
   useEffect(() => {
@@ -599,27 +701,54 @@ function MainApp() {
     setSyncStatus('syncing');
 
     try {
-      // 0. Recuperar todas las fuentes locales posibles y fusionar
+      // 0. Recuperar fuentes locales y fusionar solo cuando incorporen cambios reales
       const recovered = recoverLocalDataSources(user.uid);
-      const currentMonths = { ...latestMonthsDataRef.current };
-      for (const [mKey, mData] of Object.entries(recovered)) {
-        if (mData && hasRealUserContent(mData)) {
-          currentMonths[mKey] = currentMonths[mKey] ? mergeMonthData(currentMonths[mKey], mData) : mData;
-        }
-      }
-      latestMonthsDataRef.current = currentMonths;
-      setMonthsData(currentMonths);
+      const mergeResult = mergeAndPersistManualSync({
+        controller: persistenceControllerRef.current,
+        userId: user.uid,
+        currentKey,
+        currentMonths: latestMonthsDataRef.current,
+        recoveredMonths: recovered,
+        month: monthRef.current,
+        year: yearRef.current,
+        currency: currencyRef.current,
+        areEqualFn: areMonthDataEqual,
+        mergeFn: mergeMonthData,
+        hasContentFn: hasRealUserContent,
+        saveBudgetFn: saveBudgetState,
+        enqueuePendingFn: enqueuePendingMonth,
+        generateOpIdFn: generateOpId,
+      });
 
-      // 1. Subir a Google Firestore todos los meses locales que contengan información
+      if (mergeResult.hasChanges && !mergeResult.localSaved) {
+        setSyncStatus('error');
+        return;
+      }
+
+      if (mergeResult.hasChanges && mergeResult.localSaved) {
+        latestMonthsDataRef.current = mergeResult.nextMonths;
+        setMonthsData(mergeResult.nextMonths);
+      }
+
+      const currentMonths = mergeResult.nextMonths;
+
+      // 1. Subir a Google Firestore todos los meses locales que contengan información o sean el mes activo
       const uploadPromises: Promise<any>[] = [];
       for (const [mKey, mData] of Object.entries(currentMonths)) {
-        if (!mData || !hasRealUserContent(mData)) continue;
+        if (!mData || (!hasRealUserContent(mData) && mKey !== currentKey)) continue;
         const [yStr, moStr] = mKey.split('-');
         const parsedY = parseInt(yStr, 10);
         const parsedM = parseInt(moStr, 10) - 1;
         const y = !isNaN(parsedY) ? parsedY : new Date().getFullYear();
         const m = !isNaN(parsedM) ? parsedM : new Date().getMonth();
-        uploadPromises.push(saveMonthToFirestoreSerialized(user.uid, mKey, y, m, mData));
+        const enqueuedOpId = mergeResult.enqueuedOps[mKey];
+        uploadPromises.push(
+          saveMonthToFirestoreSerialized(user.uid, mKey, y, m, mData).then(() => {
+            if (enqueuedOpId) {
+              removePendingMonthFromQueue(user.uid, mKey, enqueuedOpId);
+            }
+          })
+        );
       }
       const results = await Promise.allSettled(uploadPromises);
       const hasErrors = results.some(r => r.status === 'rejected');
@@ -638,17 +767,30 @@ function MainApp() {
       }
 
       // 3. Procesar cola pendiente si hubiese quedado alguna operación rezagada
-      await processPendingSyncQueue(user.uid);
+      const queueRes = await processPendingSyncQueue(user.uid);
 
-      // 4. Determinar estado de sincronización
-      setSyncStatus(!hasErrors && canDeclareSyncedHelperRef.current() ? 'synced' : 'error');
+      // 4. Determinar estado de sincronización (nunca declarar synced si falta persistencia local o quedan pendientes)
+      const isPersistedLocally =
+        !persistenceControllerRef.current.hasLocalStorageFailure() &&
+        persistenceControllerRef.current.getLastPersistedVersion() ===
+          persistenceControllerRef.current.getMutationVersion() &&
+        persistenceControllerRef.current.getLastPersistedVersion() > 0;
+
+      setSyncStatus(
+        !hasErrors &&
+          queueRes.remainingCount === 0 &&
+          isPersistedLocally &&
+          canDeclareSyncedHelperRef.current()
+          ? 'synced'
+          : 'error'
+      );
     } catch (err) {
       console.error('Error durante sincronización manual con Google:', err);
       setSyncStatus('error');
     } finally {
       setIsSyncingManual(false);
     }
-  }, [user, isOfflineSession, isGuestMode]);
+  }, [user, isOfflineSession, isGuestMode, currentKey]);
 
   // Sincronización con Google Firestore y cola de reintento:
   // Si la sincronización con Google falla o la conexión se interrumpe, se guarda
@@ -780,8 +922,15 @@ function MainApp() {
 
     const currentVersion = persistenceControllerRef.current.getMutationVersion();
     const lastSaved = persistenceControllerRef.current.getLastPersistedVersion();
-    if (lastSaved < currentVersion || persistenceControllerRef.current.hasLocalStorageFailure()) {
+    if (lastSaved < currentVersion) {
       commitBudgetSnapshot(monthsData, currentVersion, { month, year, currency });
+    } else if (persistenceControllerRef.current.hasLocalStorageFailure()) {
+      const snapshot: BudgetState = { month, year, currency, monthsData };
+      const unit = persistenceControllerRef.current.createVersionedSnapshot(snapshot, currentVersion);
+      const retryOk = persistenceControllerRef.current.retryPersistence(unit, saveBudgetState);
+      if (!retryOk && user) {
+        setSyncStatus('error');
+      }
     }
   }, [month, year, currency, monthsData, user?.uid, isGuestMode, isCloudSyncReady, commitBudgetSnapshot]);
 
@@ -1423,6 +1572,45 @@ function MainApp() {
     }));
   };
 
+  const handleUpdateVariableExpense = (id: string, updatedFields: Partial<VariableExpense>) => {
+    pendingExpenseIdsRef.current.add(id);
+    deletedExpenseIdsRef.current.delete(id);
+
+    const existing = (latestMonthsDataRef.current[currentKey]?.variableExpenses || []).find(e => e.id === id);
+    const nextDate = updatedFields.date || existing?.date;
+    if (nextDate && /^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/.test(nextDate)) {
+      const [expYear, expMonth] = nextDate.split('-').map(Number);
+      const targetKey = getMonthKey(expYear, expMonth - 1);
+      if (targetKey !== currentKey && existing) {
+        const updatedItem: VariableExpense = { ...existing, ...updatedFields, date: nextDate };
+        mutateMonthData(
+          currentKey,
+          currentMonth => ({
+            ...currentMonth,
+            variableExpenses: (currentMonth.variableExpenses || []).filter(e => e.id !== id),
+          }),
+          {
+            alsoUpdateKey: targetKey,
+            alsoYear: expYear,
+            alsoMonth: expMonth - 1,
+            alsoUpdater: targetMonthData => ({
+              ...targetMonthData,
+              variableExpenses: [...(targetMonthData.variableExpenses || []).filter(e => e.id !== id), updatedItem],
+            }),
+          }
+        );
+        return;
+      }
+    }
+
+    mutateMonthData(currentKey, currentMonth => ({
+      ...currentMonth,
+      variableExpenses: (currentMonth.variableExpenses || []).map(e =>
+        e.id === id ? { ...e, ...updatedFields } : e
+      ),
+    }));
+  };
+
   // Optional manual helper: copy fixed expenses and categories from previous month
   const previousMonthDate = new Date(year, month - 1, 1);
   const previousMonthKey = getMonthKey(previousMonthDate.getFullYear(), previousMonthDate.getMonth());
@@ -1698,6 +1886,7 @@ function MainApp() {
               language={language}
               onAddExpense={handleAddVariableExpense}
               onDeleteExpense={handleDeleteVariableExpense}
+              onUpdateExpense={handleUpdateVariableExpense}
               onAddCategory={handleAddCategory}
               onUpdateCategoryColor={handleUpdateCategoryColor}
               onUpdateCategoryLabel={handleUpdateCategoryLabel}
@@ -1773,6 +1962,7 @@ function MainApp() {
               language={language}
               onAddExpense={handleAddVariableExpense}
               onDeleteExpense={handleDeleteVariableExpense}
+              onUpdateExpense={handleUpdateVariableExpense}
               onAddCategory={handleAddCategory}
               onUpdateCategoryColor={handleUpdateCategoryColor}
               onUpdateCategoryLabel={handleUpdateCategoryLabel}

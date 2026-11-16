@@ -1,20 +1,26 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 import { 
-  auth, 
+  auth,
+  db,
   ensureAuthPersistence,
-  signInWithGoogle as fbSignInWithGoogle, 
-  signInWithApple as fbSignInWithApple, 
-  linkGoogle as fbLinkGoogle, 
-  linkApple as fbLinkApple, 
+  signInWithGoogle as fbSignInWithGoogle,
   logOut as fbLogOut 
 } from '../lib/firebase';
+import {
+  registerUserAccount,
+  signInUserAccount,
+  saveActiveSession,
+  getActiveSession,
+  isUsernameTaken,
+} from '../services/authAccountService';
 
 export const NITA_AUTH_CHOICE_KEY = 'nita_auth_choice';
 export const NITA_CACHED_USER_KEY = 'nita_cached_user';
 export const NITA_GUEST_MODE_KEY = 'nita_guest_mode';
 
-export type AuthChoice = 'google' | 'apple' | 'offline' | null;
+export type AuthChoice = 'google' | 'password' | 'offline' | null;
 
 export interface CachedUserData {
   uid: string;
@@ -43,12 +49,10 @@ interface AuthContextValue {
   exitGuestMode: () => void;
   clearAuthError: () => void;
   signInWithGoogle: () => Promise<void>;
-  signInWithApple: () => Promise<void>;
-  linkGoogleAccount: () => Promise<void>;
-  linkAppleAccount: () => Promise<void>;
+  registerWithUsername: (username: string, password: string) => Promise<void>;
+  signInWithUsername: (username: string, password: string) => Promise<void>;
+  checkUsernameAvailable: (username: string) => Promise<boolean>;
   signOutUser: () => Promise<void>;
-  isGoogleLinked: boolean;
-  isAppleLinked: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -57,7 +61,7 @@ function getInitialAuthChoice(): AuthChoice {
   if (typeof window === 'undefined') return null;
   try {
     const choice = localStorage.getItem(NITA_AUTH_CHOICE_KEY) as AuthChoice;
-    if (choice === 'google' || choice === 'apple' || choice === 'offline') {
+    if (choice === 'google' || choice === 'password' || choice === 'offline') {
       return choice;
     }
     // Backward compatibility with legacy guest mode key
@@ -72,30 +76,100 @@ function getInitialAuthChoice(): AuthChoice {
 
 function getInitialCachedUser(): CachedUserData | null {
   if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(NITA_CACHED_USER_KEY);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error('Error reading cached user from localStorage:', e);
-  }
-  return null;
+  return getActiveSession();
 }
 
 function synthesizeUser(cached: CachedUserData, isOffline: boolean): NitaUser {
+  const fallbackProvider = cached.providerId || 'password';
   return {
     uid: cached.uid,
     email: cached.email,
     displayName: cached.displayName,
     photoURL: cached.photoURL,
-    providerData: cached.providerData || (cached.providerId ? [{ providerId: cached.providerId }] : [{ providerId: 'google.com' }]),
+    providerId: fallbackProvider,
+    providerData: cached.providerData || [{
+      providerId: fallbackProvider,
+      email: cached.email,
+      displayName: cached.displayName,
+      photoURL: cached.photoURL,
+    }],
     isOfflineSession: isOffline,
   } as NitaUser;
 }
 
+function serializeFirebaseUser(fbUser: User): CachedUserData {
+  const providerId = fbUser.providerData?.[0]?.providerId || 'google.com';
+  return {
+    uid: fbUser.uid,
+    email: fbUser.email,
+    displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Usuario',
+    photoURL: fbUser.photoURL,
+    providerId,
+    providerData: fbUser.providerData?.length
+      ? fbUser.providerData.map((p) => ({
+          providerId: p.providerId,
+          email: p.email,
+          displayName: p.displayName,
+          photoURL: p.photoURL,
+        }))
+      : [{
+          providerId,
+          email: fbUser.email,
+          displayName: fbUser.displayName,
+          photoURL: fbUser.photoURL,
+        }],
+    isOfflineSession: false,
+  };
+}
+
+function formatGoogleAuthError(err: unknown): string {
+  const code = (err as { code?: string })?.code || '';
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'Se canceló el inicio de sesión con Google.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'El navegador bloqueó la ventana emergente de Google. Permite las ventanas emergentes e intenta nuevamente.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Error de conexión al intentar acceder con Google. Verifica tu internet e intenta nuevamente.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return 'Este dominio no está autorizado para iniciar sesión con Google en Firebase Auth.';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'El proveedor de Google no está habilitado en la configuración de Firebase Authentication.';
+  }
+  return message || 'No se pudo iniciar sesión con Google.';
+}
+
+async function ensureUserProfileDoc(userData: CachedUserData): Promise<void> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+  try {
+    const now = new Date().toISOString();
+    const userRef = doc(db, 'users', userData.uid);
+    await setDoc(
+      userRef,
+      {
+        uid: userData.uid,
+        email: userData.email,
+        displayName: userData.displayName,
+        photoURL: userData.photoURL,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('[Auth] Could not sync Google profile document:', err);
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authChoice, setAuthChoice] = useState<AuthChoice>(() => getInitialAuthChoice());
+  const authChoiceRef = useRef<AuthChoice>(authChoice);
+  authChoiceRef.current = authChoice;
+
   const [isOnline, setIsOnline] = useState<boolean>(() => {
     return typeof navigator !== 'undefined' ? navigator.onLine : true;
   });
@@ -112,44 +186,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<NitaUser | null>(() => {
     const initialChoice = getInitialAuthChoice();
     const initialCached = getInitialCachedUser();
-    // In pure offline scenarios without network, prime with local cached identity
-    if (typeof navigator !== 'undefined' && !navigator.onLine && initialCached && (initialChoice === 'google' || initialChoice === 'apple')) {
-      return synthesizeUser(initialCached, true);
+    if (initialCached && initialChoice !== 'offline') {
+      return synthesizeUser(initialCached, typeof navigator !== 'undefined' ? !navigator.onLine : false);
     }
     return null;
   });
 
-  // Loading state: always wait for Firebase Auth onAuthStateChanged/authStateReady to resolve persistent session
   const [loading, setLoading] = useState<boolean>(() => {
-    const initialChoice = getInitialAuthChoice();
-    // Only skip loading if explicitly in guest mode without account
-    if (initialChoice === 'offline') return false;
-    // If device is offline and we already have cached user profile, allow immediate start without blocking UI
-    if (typeof navigator !== 'undefined' && !navigator.onLine && getInitialCachedUser()) {
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOffline && getInitialCachedUser()) {
       return false;
     }
-    return true;
+    return false;
   });
-
   const [authError, setAuthError] = useState<string | null>(null);
-  const [isFirebaseAuthActive, setIsFirebaseAuthActive] = useState<boolean>(() => Boolean(auth.currentUser));
+  const [isFirebaseAuthActive, setIsFirebaseAuthActive] = useState<boolean>(() => Boolean(user));
 
   // Monitor network connection online / offline status
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      if (auth.currentUser) {
-        setIsFirebaseAuthActive(true);
-        setUser(auth.currentUser as NitaUser);
-      } else {
-        setUser(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            isOfflineSession: false,
-          } as NitaUser;
-        });
-      }
+      setUser(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          isOfflineSession: false,
+        } as NitaUser;
+      });
+      setIsFirebaseAuthActive(Boolean(user));
     };
 
     const handleOffline = () => {
@@ -170,126 +234,83 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [user]);
 
-  // Firebase auth state listener: authoritative source of truth for user authentication
+  // Listen to Firebase Auth state for Google sessions and preserve local username/offline sessions
   useEffect(() => {
     let isMounted = true;
+    ensureAuthPersistence().catch(() => {});
 
-    // Safety fallback timeout: if browser storage is hanging or blocked, release loading after 8s (or 1.5s when offline)
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-    const safetyTimeoutMs = isOffline ? 1500 : 8000;
-    const safetyTimer = setTimeout(() => {
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       if (!isMounted) return;
-      console.warn('[AuthContext] Firebase auth resolution safety timer reached limit');
-      setLoading(false);
-    }, safetyTimeoutMs);
 
-    // Coordinate with persistence initialization and authStateReady()
-    ensureAuthPersistence()
-      .then(() => {
-        if (typeof (auth as any).authStateReady === 'function') {
-          return (auth as any).authStateReady();
-        }
-      })
-      .catch((err) => {
-        console.warn('[AuthContext] Persistence / authStateReady warning:', err);
-      });
+      const currentChoice = authChoiceRef.current;
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!isMounted) return;
-      clearTimeout(safetyTimer);
+      // Never overwrite active username/password or offline guest sessions
+      if (currentChoice === 'password' || currentChoice === 'offline') {
+        return;
+      }
 
-      if (currentUser) {
-        // Genuine Firebase authenticated user restored from browserLocalPersistence
-        const providerId = currentUser.providerData?.[0]?.providerId || '';
-        const choice: AuthChoice = providerId.includes('apple') ? 'apple' : 'google';
-
-        const cached: CachedUserData = {
-          uid: currentUser.uid,
-          email: currentUser.email,
-          displayName: currentUser.displayName,
-          photoURL: currentUser.photoURL,
-          providerId: providerId || 'google.com',
-          providerData: currentUser.providerData?.map(p => ({
-            providerId: p.providerId,
-            email: p.email,
-            displayName: p.displayName,
-            photoURL: p.photoURL,
-          })) || [{ providerId: 'google.com' }],
-          isOfflineSession: typeof navigator !== 'undefined' ? !navigator.onLine : false,
-        };
-
+      if (fbUser) {
+        const userData = serializeFirebaseUser(fbUser);
+        saveActiveSession(userData);
         try {
-          localStorage.setItem(NITA_AUTH_CHOICE_KEY, choice);
-          localStorage.setItem(NITA_CACHED_USER_KEY, JSON.stringify(cached));
           localStorage.removeItem(NITA_GUEST_MODE_KEY);
-        } catch (e) {
-          console.warn('Could not persist auth choice:', e);
+        } catch {
+          // ignore
         }
-
-        setAuthChoice(choice);
-        setCachedUser(cached);
-        setUser(currentUser as NitaUser);
+        authChoiceRef.current = 'google';
+        setAuthChoice('google');
+        setCachedUser(userData);
         setIsGuestMode(false);
         setIsFirebaseAuthActive(true);
+        setUser(synthesizeUser(userData, typeof navigator !== 'undefined' ? !navigator.onLine : false));
         setLoading(false);
       } else {
-        // Firebase has determined that no active Firebase Auth session exists in this browser instance
-        setIsFirebaseAuthActive(false);
-        const savedChoice = getInitialAuthChoice();
-        const existingCached = getInitialCachedUser();
-
-        if (savedChoice === 'offline') {
-          setUser(null);
-          setCachedUser(null);
-          setIsGuestMode(true);
-          setLoading(false);
-        } else if (existingCached && (savedChoice === 'google' || savedChoice === 'apple')) {
-          const isCurrentlyOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-          if (isCurrentlyOffline) {
-            // Offline fallback: allow access to previously saved local data without inventing a fake Firebase session
-            const offlineUser = synthesizeUser(existingCached, true);
-            setUser(offlineUser);
-            setCachedUser(existingCached);
-            setIsGuestMode(false);
-            setLoading(false);
-          } else {
-            // Online: Firebase verified there is no authenticated session.
-            // Do not invent a fake online session; present login screen safely.
-            setUser(null);
-            setIsGuestMode(false);
-            setLoading(false);
-          }
-        } else {
-          setUser(null);
-          setCachedUser(null);
+        // Offline or initial persistence check: preserve cached Google session if present
+        const session = getActiveSession();
+        if (session && currentChoice === 'google') {
+          setUser(synthesizeUser(session, typeof navigator !== 'undefined' ? !navigator.onLine : false));
+          setCachedUser(session);
           setIsGuestMode(false);
-          setLoading(false);
+          setIsFirebaseAuthActive(true);
         }
+        setLoading(false);
       }
     });
 
     return () => {
       isMounted = false;
-      clearTimeout(safetyTimer);
       unsubscribe();
     };
   }, []);
+
+  // Restore local session on mount / authChoice changes
+  useEffect(() => {
+    const session = getActiveSession();
+    if (session && authChoice !== 'offline') {
+      setUser(synthesizeUser(session, typeof navigator !== 'undefined' ? !navigator.onLine : false));
+      setCachedUser(session);
+      setIsGuestMode(false);
+      setIsFirebaseAuthActive(true);
+    }
+  }, [authChoice]);
 
   const continueWithoutAccount = () => {
     try {
       localStorage.setItem(NITA_AUTH_CHOICE_KEY, 'offline');
       localStorage.setItem(NITA_GUEST_MODE_KEY, 'true');
-      localStorage.removeItem(NITA_CACHED_USER_KEY);
+      saveActiveSession(null);
     } catch (e) {
       console.warn('Failed to save offline choice:', e);
     }
+    authChoiceRef.current = 'offline';
     setAuthChoice('offline');
     setIsGuestMode(true);
     setUser(null);
     setCachedUser(null);
     setAuthError(null);
+    setIsFirebaseAuthActive(false);
   };
 
   const exitGuestMode = () => {
@@ -299,6 +320,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn('Failed to clear offline choice:', e);
     }
+    authChoiceRef.current = null;
     setAuthChoice(null);
     setIsGuestMode(false);
     setUser(null);
@@ -306,186 +328,86 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearAuthError = () => setAuthError(null);
 
-  const getFriendlyAuthError = (err: unknown, provider?: 'apple' | 'google'): string => {
-    if (!(err instanceof Error)) return 'Ocurrió un error inesperado al autenticar.';
-    const msg = err.message || '';
-    if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
-      return '';
-    }
-    if (msg.includes('auth/popup-blocked')) {
-      return 'El navegador bloqueó la ventana emergente de Google. Por favor, toca "Permitir ventanas emergentes" o intenta presionar nuevamente el botón.';
-    }
-    if (msg.includes('auth/unauthorized-domain')) {
-      return 'El dominio actual no está en la lista de dominios autorizados de Firebase Authentication. Ve a Firebase Console > Authentication > Settings > Authorized Domains y agrega este dominio.';
-    }
-    if (msg.includes('auth/credential-already-in-use')) {
-      return 'Esta credencial ya está vinculada a otra cuenta de NITA.';
-    }
-    if (msg.includes('auth/account-exists-with-different-credential')) {
-      return 'Ya existe una cuenta con este correo pero con otro método de acceso. Inicia sesión con tu proveedor habitual y luego vincúlala desde Configuración.';
-    }
-    if (msg.includes('auth/network-request-failed') || msg.includes('the client is offline')) {
-      return 'No hay conexión a internet disponible. Puedes "Ingresar sin cuenta" para utilizar NITA de forma offline y sincronizar después.';
-    }
-    if (msg.includes('persistence') || msg.includes('unsupported-persistence-type')) {
-      return 'No se pudo configurar el almacenamiento local seguro para la sesión en este navegador. Verifica los permisos de almacenamiento y cookies.';
-    }
-    if (msg.includes('auth/operation-not-allowed') || msg.includes('auth/configuration-not-found')) {
-      if (provider === 'apple' || msg.toLowerCase().includes('apple')) {
-        return 'Apple Sign-In no está configurado en Firebase Console (requiere membresía Apple Developer $99/año).';
-      }
-      return 'El proveedor de autenticación aún no está habilitado en la consola de Firebase.';
-    }
-    return err.message;
-  };
-
   const signInWithGoogle = async () => {
     setAuthError(null);
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const msg = 'No hay conexión a internet. Conéctate para iniciar sesión con Google o usa "Ingresar sin cuenta".';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
     try {
-      const res = await fbSignInWithGoogle();
-      if (res.user) {
-        const choice: AuthChoice = 'google';
-        const cached: CachedUserData = {
-          uid: res.user.uid,
-          email: res.user.email,
-          displayName: res.user.displayName,
-          photoURL: res.user.photoURL,
-          providerId: 'google.com',
-          providerData: res.user.providerData?.map(p => ({
-            providerId: p.providerId,
-            email: p.email,
-            displayName: p.displayName,
-            photoURL: p.photoURL,
-          })) || [{ providerId: 'google.com' }],
-          isOfflineSession: false,
-        };
-        try {
-          localStorage.setItem(NITA_AUTH_CHOICE_KEY, choice);
-          localStorage.setItem(NITA_CACHED_USER_KEY, JSON.stringify(cached));
-          localStorage.removeItem(NITA_GUEST_MODE_KEY);
-        } catch (e) {
-          console.warn('Could not persist auth choice:', e);
-        }
-        setAuthChoice(choice);
-        setCachedUser(cached);
-        setUser(res.user as NitaUser);
-        setIsGuestMode(false);
-        setIsFirebaseAuthActive(true);
+      const fbUser = await fbSignInWithGoogle();
+      const userData = serializeFirebaseUser(fbUser);
+      saveActiveSession(userData);
+      try {
+        localStorage.removeItem(NITA_GUEST_MODE_KEY);
+      } catch {
+        // ignore
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
-        // User voluntarily closed popup: do not show an error banner
-        return;
-      }
-      const friendly = getFriendlyAuthError(err, 'google');
-      setAuthError(friendly);
-      throw err;
+      authChoiceRef.current = 'google';
+      setAuthChoice('google');
+      setCachedUser(userData);
+      setIsGuestMode(false);
+      setIsFirebaseAuthActive(true);
+      setUser(synthesizeUser(userData, false));
+
+      // Ensure user profile document exists in Firestore
+      void ensureUserProfileDoc(userData);
+    } catch (err: unknown) {
+      const msg = formatGoogleAuthError(err);
+      setAuthError(msg);
+      throw new Error(msg);
     }
   };
 
-  const signInWithApple = async () => {
+  const checkUsernameAvailable = async (username: string): Promise<boolean> => {
+    try {
+      const taken = await isUsernameTaken(username);
+      return !taken;
+    } catch {
+      return false;
+    }
+  };
+
+  const registerWithUsername = async (username: string, password: string) => {
     setAuthError(null);
     try {
-      const res = await fbSignInWithApple();
-      if (res.user) {
-        const choice: AuthChoice = 'apple';
-        const cached: CachedUserData = {
-          uid: res.user.uid,
-          email: res.user.email,
-          displayName: res.user.displayName,
-          photoURL: res.user.photoURL,
-          providerId: 'apple.com',
-          providerData: res.user.providerData?.map(p => ({
-            providerId: p.providerId,
-            email: p.email,
-            displayName: p.displayName,
-            photoURL: p.photoURL,
-          })) || [{ providerId: 'apple.com' }],
-          isOfflineSession: false,
-        };
-        try {
-          localStorage.setItem(NITA_AUTH_CHOICE_KEY, choice);
-          localStorage.setItem(NITA_CACHED_USER_KEY, JSON.stringify(cached));
-          localStorage.removeItem(NITA_GUEST_MODE_KEY);
-        } catch (e) {
-          console.warn('Could not persist auth choice:', e);
-        }
-        setAuthChoice(choice);
-        setCachedUser(cached);
-        setUser(res.user as NitaUser);
-        setIsGuestMode(false);
-        setIsFirebaseAuthActive(true);
+      const userData = await registerUserAccount(username, password);
+      const synth = synthesizeUser(userData, false);
+      authChoiceRef.current = 'password';
+      setUser(synth);
+      setCachedUser(userData);
+      setAuthChoice('password');
+      setIsGuestMode(false);
+      setIsFirebaseAuthActive(true);
+      if (auth.currentUser) {
+        fbLogOut().catch(() => {});
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
-        const errorObj = new Error('popup-closed');
-        (errorObj as unknown as { code: string }).code = 'popup-closed';
-        throw errorObj;
-      }
-      if (
-        msg.includes('auth/operation-not-allowed') ||
-        msg.includes('auth/configuration-not-found') ||
-        msg.includes('auth/invalid-provider-id') ||
-        msg.toLowerCase().includes('apple')
-      ) {
-        // Apple provider is not configured in Firebase Console.
-        // DO NOT set authError (so no red cartel appears).
-        const errorObj = new Error('apple-not-configured');
-        (errorObj as unknown as { code: string }).code = 'apple-not-configured';
-        throw errorObj;
-      }
-      const friendly = getFriendlyAuthError(err, 'apple');
-      if (friendly) setAuthError(friendly);
+      setAuthError(msg);
       throw err;
     }
   };
 
-  const linkGoogleAccount = async () => {
-    if (!user) return;
+  const signInWithUsername = async (username: string, password: string) => {
     setAuthError(null);
     try {
-      const res = await fbLinkGoogle(user as User);
-      setUser(res.user as NitaUser);
+      const userData = await signInUserAccount(username, password);
+      const synth = synthesizeUser(userData, false);
+      authChoiceRef.current = 'password';
+      setUser(synth);
+      setCachedUser(userData);
+      setAuthChoice('password');
+      setIsGuestMode(false);
       setIsFirebaseAuthActive(true);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
-        return;
+      if (auth.currentUser) {
+        fbLogOut().catch(() => {});
       }
-      const friendly = getFriendlyAuthError(err, 'google');
-      if (friendly) setAuthError(friendly);
-      throw err;
-    }
-  };
-
-  const linkAppleAccount = async () => {
-    if (!user) return;
-    setAuthError(null);
-    try {
-      const res = await fbLinkApple(user as User);
-      setUser(res.user as NitaUser);
-      setIsFirebaseAuthActive(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
-        const errorObj = new Error('popup-closed');
-        (errorObj as unknown as { code: string }).code = 'popup-closed';
-        throw errorObj;
-      }
-      if (
-        msg.includes('auth/operation-not-allowed') ||
-        msg.includes('auth/configuration-not-found') ||
-        msg.includes('auth/invalid-provider-id') ||
-        msg.toLowerCase().includes('apple')
-      ) {
-        const errorObj = new Error('apple-not-configured');
-        (errorObj as unknown as { code: string }).code = 'apple-not-configured';
-        throw errorObj;
-      }
-      const friendly = getFriendlyAuthError(err, 'apple');
-      if (friendly) setAuthError(friendly);
+      setAuthError(msg);
       throw err;
     }
   };
@@ -496,9 +418,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem(NITA_AUTH_CHOICE_KEY);
       localStorage.removeItem(NITA_CACHED_USER_KEY);
       localStorage.removeItem(NITA_GUEST_MODE_KEY);
+      saveActiveSession(null);
     } catch (e) {
       console.warn('Failed to clear auth storage:', e);
     }
+    authChoiceRef.current = null;
     setAuthChoice(null);
     setCachedUser(null);
     setIsGuestMode(false);
@@ -510,16 +434,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Sign out warning:', err);
     }
   };
-
-  const isGoogleLinked = Boolean(
-    user?.providerData?.some(p => p.providerId === 'google.com') ||
-    authChoice === 'google'
-  );
-
-  const isAppleLinked = Boolean(
-    user?.providerData?.some(p => p.providerId === 'apple.com') ||
-    authChoice === 'apple'
-  );
 
   const isOfflineSession = Boolean(
     user && (!isOnline || (user as any).isOfflineSession === true)
@@ -540,12 +454,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         exitGuestMode,
         clearAuthError,
         signInWithGoogle,
-        signInWithApple,
-        linkGoogleAccount,
-        linkAppleAccount,
+        registerWithUsername,
+        signInWithUsername,
+        checkUsernameAvailable,
         signOutUser,
-        isGoogleLinked,
-        isAppleLinked,
       }}
     >
       {children}

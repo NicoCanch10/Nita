@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { MONTH_NAMES_ES } from '../utils/calendar';
 import { getTranslations } from '../utils/languages';
 import { CurrencyCode, FixedExpense, CategoryInfo } from '../types/budget';
@@ -9,10 +9,7 @@ import { SettingsMenu } from './SettingsMenu';
 import { 
   ChevronLeft, 
   ChevronRight,
-  Cloud,
-  CloudOff,
-  CheckCircle2,
-  Loader2
+  Cloud
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -80,16 +77,14 @@ export const Header: React.FC<HeaderProps> = ({
   onAlertSettingsChange,
   language,
   onLanguageChange,
-  syncStatus = 'idle',
+  syncStatus: _syncStatus = 'idle',
   nextMonthExpenses,
   nextMonthYear,
   nextMonth,
   onManualSync,
   isSyncingManual = false,
 }) => {
-  const { user, isFirebaseAuthActive, isOnline, isOfflineSession, signInWithGoogle } = useAuth();
-  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
-  const [connectError, setConnectError] = useState<string | null>(null);
+  const { isGuestMode, exitGuestMode } = useAuth();
   const t = getTranslations(language || 'es');
   const monthNames = t.months || MONTH_NAMES_ES;
 
@@ -115,6 +110,28 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-colors">
+      {/* Banner de Modo Local cuando el usuario no ha iniciado sesión en este dispositivo */}
+      {isGuestMode && (
+        <div className="bg-amber-500/10 dark:bg-amber-500/20 border-b border-amber-500/20 px-3 sm:px-6 py-2">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 text-xs text-center sm:text-left">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white font-black text-3xs shrink-0">!</span>
+              <span>
+                <strong>Modo Local (Sin cuenta en este dispositivo):</strong> Tus datos están guardados solo en este dispositivo.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={exitGuestMode}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-extrabold text-xs shadow-xs cursor-pointer transition-all shrink-0"
+            >
+              <Cloud className="w-3.5 h-3.5 shrink-0" />
+              <span>Iniciar sesión o Crear cuenta para sincronizar</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           
@@ -135,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Month / Year & Action Controls */}
-          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 flex-wrap sm:flex-nowrap">
             {/* Month & Year Stepper */}
             <div className="inline-flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 text-slate-700 dark:text-slate-300">
               <button
@@ -180,119 +197,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
-
-            {/* Simultaneous Multi-Device Sync Indicator / Interactive Connect Button */}
-            {user && !isFirebaseAuthActive && isOnline && !isOfflineSession ? (
-              <div className="relative inline-flex items-center">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      setIsConnectingGoogle(true);
-                      setConnectError(null);
-                      await signInWithGoogle();
-                    } catch (e: any) {
-                      const msg = e?.message || String(e);
-                      if (msg.includes('popup-closed') || msg.includes('cancelled')) {
-                        return;
-                      }
-                      if (msg.includes('popup-blocked')) {
-                        setConnectError('El navegador bloqueó la ventana de Google. Toca "Abrir pestaña completa" para autenticarte sin restricciones.');
-                      } else {
-                        setConnectError(e?.message || 'Error al conectar con Google. Abre la app en pestaña completa para validar.');
-                      }
-                    } finally {
-                      setIsConnectingGoogle(false);
-                    }
-                  }}
-                  disabled={isConnectingGoogle}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-3xs font-extrabold transition-all shadow-xs cursor-pointer disabled:opacity-50"
-                  title="Tu sesión requiere validar la cuenta de Google en este navegador. Haz clic para conectar e iniciar sincronización simultánea."
-                >
-                  {isConnectingGoogle ? (
-                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                  ) : (
-                    <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                      <path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                    </svg>
-                  )}
-                  <span>{isConnectingGoogle ? 'Conectando...' : 'Conectar con Google'}</span>
-                </button>
-
-                {connectError && (
-                  <div className="absolute right-0 top-full mt-2 w-72 p-3 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 z-50 text-2xs space-y-2 animate-in fade-in">
-                    <p className="text-slate-700 dark:text-slate-300 leading-snug">
-                      {connectError}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={typeof window !== 'undefined' ? window.location.href : '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-3xs"
-                      >
-                        Abrir pestaña completa ↗
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => setConnectError(null)}
-                        className="px-2 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-3xs cursor-pointer"
-                      >
-                        Cerrar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : user && (
-              <button 
-                type="button"
-                onClick={() => {
-                  if (onManualSync) {
-                    onManualSync();
-                  }
-                }}
-                disabled={isSyncingManual}
-                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100/90 hover:bg-slate-200/90 dark:bg-slate-800/90 dark:hover:bg-slate-700/90 border border-slate-200/90 dark:border-slate-700/80 text-3xs font-extrabold transition-all shadow-2xs cursor-pointer active:scale-95 disabled:opacity-60"
-                title={
-                  isSyncingManual || syncStatus === 'syncing'
-                    ? 'Sincronizando con Google en este momento...'
-                    : syncStatus === 'error'
-                    ? 'En espera de conexión con Google. Haz clic para forzar sincronización ahora.'
-                    : syncStatus === 'offline'
-                    ? 'Modo sin conexión. Haz clic para reintentar sincronizar.'
-                    : 'Sincronización en simultáneo activa. Haz clic para sincronizar ahora con Google.'
-                }
-              >
-                {isSyncingManual || syncStatus === 'syncing' ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin text-blue-500 shrink-0" />
-                    <span className="text-blue-700 dark:text-blue-300">Sincronizando...</span>
-                  </>
-                ) : syncStatus === 'offline' ? (
-                  <>
-                    <CloudOff className="w-3 h-3 text-amber-500 dark:text-amber-400 shrink-0" />
-                    <span className="text-amber-700 dark:text-amber-300">Offline (Guardado)</span>
-                  </>
-                ) : syncStatus === 'error' ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin text-amber-500 shrink-0" />
-                    <span className="text-amber-700 dark:text-amber-300">Reintentar sinc. ↻</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                    </span>
-                    <span className="text-emerald-700 dark:text-emerald-300">En simultáneo ✓</span>
-                  </>
-                )}
-              </button>
-            )}
 
             {/* In-App Notifications Bell for Due Dates (respects alertSettings) */}
             <NotificationCenter

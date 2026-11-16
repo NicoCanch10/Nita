@@ -449,7 +449,34 @@ export function processRemoteMonthsSnapshot(
 
     const isMonthInQueue = pendingMonthKeys.has(mKey);
 
-    // 1. Filter remote fixed expenses against active deletion tombstones (60-second grace period)
+    // Regla obligatoria: Cuando un snapshot remoto esté confirmado y no existan cambios locales pendientes
+    // ni conflictos que protejan ese mes, el dispositivo adopta exactamente el contenido remoto:
+    // ingresos en 0, ahorros en 0, gastos eliminados, isPaid en false, y listas vacías.
+    if (!isMonthInQueue) {
+      (remoteData.fixedExpenses || []).forEach(e => {
+        pendingFixedIds.delete(e.id);
+        modifiedFixedIds?.delete(e.id);
+        deletedFixedIds.delete(e.id);
+      });
+      (remoteData.variableExpenses || []).forEach(e => {
+        pendingExpenseIds.delete(e.id);
+        deletedExpenseIds.delete(e.id);
+      });
+
+      updatedMonths[mKey] = {
+        income: Number(remoteData.income) || 0,
+        savingsRate: Number(remoteData.savingsRate) || 0,
+        extraDaysPosition: remoteData.extraDaysPosition === 'start' ? 'start' : 'end',
+        categories: (remoteData.categories || []).map(cleanCategory),
+        fixedExpenses: (remoteData.fixedExpenses || []).map(cleanFixedExpense) as FixedExpense[],
+        variableExpenses: (remoteData.variableExpenses || []).map(cleanVariableExpense) as VariableExpense[],
+        jarAdjustments: { ...(remoteData.jarAdjustments || {}) },
+        lastJarAdjustmentLog: remoteData.lastJarAdjustmentLog ? cleanForFirestore(remoteData.lastJarAdjustmentLog) : undefined,
+      };
+      continue;
+    }
+
+    // Preservar datos locales únicamente cuando exista una operación local pendiente de envío
     const cleanRemoteFixed = (remoteData.fixedExpenses || []).filter(e => {
       const deletedAt = deletedFixedIds.get(e.id);
       if (!deletedAt) return true;
@@ -458,7 +485,6 @@ export function processRemoteMonthsSnapshot(
       return true;
     });
 
-    // 2. Filter remote variable expenses against active deletion tombstones
     const cleanRemoteVar = (remoteData.variableExpenses || []).filter(e => {
       const deletedAt = deletedExpenseIds.get(e.id);
       if (!deletedAt) return true;
@@ -467,75 +493,31 @@ export function processRemoteMonthsSnapshot(
       return true;
     });
 
-    // 3. Clear tombstones for items that remote data has confirmed are gone
-    const remoteFixedIdSet = new Set((remoteData.fixedExpenses || []).map(e => e.id));
-    deletedFixedIds.forEach((_, id) => {
-      if (!remoteFixedIdSet.has(id)) {
-        deletedFixedIds.delete(id);
-      }
-    });
-
-    const remoteVarIdSet = new Set((remoteData.variableExpenses || []).map(e => e.id));
-    deletedExpenseIds.forEach((_, id) => {
-      if (!remoteVarIdSet.has(id)) {
-        deletedExpenseIds.delete(id);
-      }
-    });
-
-    // 4. Preserve any fixed expenses that were added locally and are still pending remote confirmation
     const cleanRemoteFixIds = new Set(cleanRemoteFixed.map(e => e.id));
     const pendingFixExpenses = (localData.fixedExpenses || []).filter(
       e => (pendingFixedIds.has(e.id) || isMonthInQueue) && !cleanRemoteFixIds.has(e.id) && !deletedFixedIds.has(e.id)
     );
     cleanRemoteFixed.forEach(e => pendingFixedIds.delete(e.id));
 
-    // Preserve locally modified fixed expenses whose remote confirmation hasn't caught up (60-second grace period or queue)
     const reconciledFixed = cleanRemoteFixed.map(rExp => {
       const modifiedAt = modifiedFixedIds?.get(rExp.id);
       const localExp = (localData.fixedExpenses || []).find(l => l.id === rExp.id);
-      if (localExp) {
-        const isRemoteUpdated =
-          rExp.name === localExp.name &&
-          Number(rExp.amount) === Number(localExp.amount) &&
-          rExp.category === localExp.category &&
-          Boolean(rExp.isPaid) === Boolean(localExp.isPaid) &&
-          (rExp.dueDate ?? null) === (localExp.dueDate ?? null);
-
-        if (isRemoteUpdated) {
-          modifiedFixedIds?.delete(rExp.id);
-          return rExp;
-        }
-
-        // If month is in queue or was modified recently (within 60s), preserve local state (e.g. isPaid toggle)
-        if (isMonthInQueue || (modifiedAt && (now - modifiedAt < 60000))) {
-          return localExp;
-        }
-      }
-      if (modifiedAt && (now - modifiedAt >= 60000) && !isMonthInQueue) {
-        modifiedFixedIds?.delete(rExp.id);
+      if (localExp && (isMonthInQueue || (modifiedAt && (now - modifiedAt < 60000)))) {
+        return localExp;
       }
       return rExp;
     });
 
-    // 5. Preserve any variable expenses that were added locally and are still pending remote confirmation
     const cleanRemoteVarIds = new Set(cleanRemoteVar.map(e => e.id));
     const pendingVarExpenses = (localData.variableExpenses || []).filter(
       e => (pendingExpenseIds.has(e.id) || isMonthInQueue) && !cleanRemoteVarIds.has(e.id) && !deletedExpenseIds.has(e.id)
     );
     cleanRemoteVar.forEach(e => pendingExpenseIds.delete(e.id));
 
-    const effectiveIncome = Number(remoteData.income) > 0 
-      ? Number(remoteData.income) 
-      : (Number(localData.income) > 0 ? Number(localData.income) : 0);
-
-    const effectiveSavingsRate = Number(remoteData.savingsRate) > 0
-      ? Number(remoteData.savingsRate)
-      : (Number(localData.savingsRate) > 0 ? Number(localData.savingsRate) : 0);
-
     updatedMonths[mKey] = {
       ...remoteData,
-      income: effectiveIncome,
-      savingsRate: effectiveSavingsRate,
+      income: Number(localData.income) || 0,
+      savingsRate: Number(localData.savingsRate) || 0,
       variableExpenses: [...cleanRemoteVar, ...pendingVarExpenses],
       fixedExpenses: [...reconciledFixed, ...pendingFixExpenses],
     };
@@ -994,6 +976,21 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs = 25000): Promise<
 }
 
 /**
+ * Valida la autorización de escritura para el recurso de un usuario en Firestore.
+ * Compatible tanto con cuentas de usuario/contraseña (donde la sesión de usuario activa
+ * reside en el contexto de la aplicación) como con sesiones activas de Firebase Auth.
+ */
+export function verifyUserAuthorization(userId: string): void {
+  if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+    throw new Error(`Escritura no autorizada en Firestore: identificador de usuario inválido (${userId})`);
+  }
+  // Si Firebase Auth tiene un usuario activo con un UID diferente, rechazar por conflicto de identidad
+  if (auth.currentUser && auth.currentUser.uid !== userId) {
+    throw new Error(`Escritura no autorizada en Firestore: la sesión de Firebase (${auth.currentUser.uid}) no coincide con el recurso (${userId})`);
+  }
+}
+
+/**
  * Saves a single month data record to Firestore.
  * Automatically sanitizes fixedExpenses and all fields so that omitted due dates
  * NEVER throw "Unsupported field value: undefined" errors to Google Cloud.
@@ -1006,6 +1003,7 @@ export async function saveMonthToFirestore(
   month: number,
   data: MonthData
 ): Promise<void> {
+  verifyUserAuthorization(userId);
   const path = `users/${userId}/months/${monthKey}`;
   try {
     const [keyYearStr, keyMonthStr] = monthKey.split('-');
@@ -1043,6 +1041,7 @@ export async function saveGlobalCategoriesToFirestore(
   userId: string,
   categories: CategoryInfo[]
 ): Promise<void> {
+  verifyUserAuthorization(userId);
   const path = `users/${userId}/categories/global`;
   try {
     const catsRef = doc(db, 'users', userId, 'categories', 'global');
@@ -1064,6 +1063,7 @@ export async function saveUserPreferencesToFirestore(
   userId: string,
   preferences: { currency?: CurrencyCode; language?: string }
 ): Promise<void> {
+  verifyUserAuthorization(userId);
   const path = `users/${userId}`;
   try {
     const userDocRef = doc(db, 'users', userId);
@@ -1267,7 +1267,7 @@ export async function processPendingSyncQueue(
     return { syncedCount: 0, remainingCount: q.length };
   }
 
-  if (!auth.currentUser || auth.currentUser.uid !== userId) {
+  if (!userId || typeof userId !== 'string' || (auth.currentUser && auth.currentUser.uid !== userId)) {
     const q = getPendingSyncQueue(userId);
     return { syncedCount: 0, remainingCount: q.length };
   }
@@ -1318,12 +1318,46 @@ export async function processPendingSyncQueue(
 }
 
 /**
+ * Processes a Firestore QuerySnapshot for user months and forwards to onMonthsUpdate.
+ * Transmits (monthsMap, hasPendingWrites, fromCache) in that exact order without simulated values.
+ */
+export function handleUserMonthsSnapshot(
+  snapshot: {
+    metadata: { hasPendingWrites: boolean; fromCache: boolean };
+    forEach: (cb: (docSnap: { data: () => any }) => void) => void;
+  },
+  onMonthsUpdate: (months: Record<string, MonthData>, hasPendingWrites: boolean, fromCache: boolean) => void
+): void {
+  const hasPendingWrites = Boolean(snapshot.metadata.hasPendingWrites);
+  const fromCache = Boolean(snapshot.metadata.fromCache);
+  const monthsMap: Record<string, MonthData> = {};
+  snapshot.forEach((docSnap) => {
+    const d = docSnap.data() as UserMonthDoc;
+    if (d && d.monthKey) {
+      monthsMap[d.monthKey] = {
+        income: Number(d.income) || 0,
+        savingsRate: Number(d.savingsRate) || 0,
+        extraDaysPosition: d.extraDaysPosition ?? 'end',
+        categories: parseCategories(d.categories),
+        fixedExpenses: parseFixedExpenses(d.fixedExpenses),
+        variableExpenses: parseVariableExpenses(d.variableExpenses),
+        jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
+        lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
+      };
+    }
+  });
+  onMonthsUpdate(monthsMap, hasPendingWrites, fromCache);
+}
+
+/**
  * Sets up real-time listener for user months collection.
  * Triggers callback whenever any month is modified on another device.
+ * Transmits monthsMap, hasPendingWrites, and fromCache.
  */
 export function subscribeToUserMonths(
   userId: string,
-  onMonthsUpdate: (months: Record<string, MonthData>, hasPendingWrites: boolean) => void
+  onMonthsUpdate: (months: Record<string, MonthData>, hasPendingWrites: boolean, fromCache: boolean) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe {
   const colPath = `users/${userId}/months`;
   const monthsColRef = collection(db, 'users', userId, 'months');
@@ -1332,26 +1366,12 @@ export function subscribeToUserMonths(
     monthsColRef,
     { includeMetadataChanges: true },
     (snapshot) => {
-      const hasPendingWrites = snapshot.metadata.hasPendingWrites;
-      const monthsMap: Record<string, MonthData> = {};
-      snapshot.forEach((docSnap) => {
-        const d = docSnap.data() as UserMonthDoc;
-        if (d && d.monthKey) {
-          monthsMap[d.monthKey] = {
-            income: Number(d.income) || 0,
-            savingsRate: Number(d.savingsRate) || 0,
-            extraDaysPosition: d.extraDaysPosition ?? 'end',
-            categories: parseCategories(d.categories),
-            fixedExpenses: parseFixedExpenses(d.fixedExpenses),
-            variableExpenses: parseVariableExpenses(d.variableExpenses),
-            jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
-            lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
-          };
-        }
-      });
-      onMonthsUpdate(monthsMap, hasPendingWrites);
+      handleUserMonthsSnapshot(snapshot, onMonthsUpdate);
     },
     (error) => {
+      if (onError) {
+        onError(error);
+      }
       handleFirestoreError(error, OperationType.LIST, colPath);
     }
   );
@@ -1364,7 +1384,8 @@ export function subscribeToUserMonths(
 export function subscribeToUserMonth(
   userId: string,
   monthKey: string,
-  onMonthUpdate: (monthData: MonthData | null, hasPendingWrites: boolean) => void
+  onMonthUpdate: (monthData: MonthData | null, hasPendingWrites: boolean, fromCache?: boolean) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe {
   const docPath = `users/${userId}/months/${monthKey}`;
   const docRef = doc(db, 'users', userId, 'months', monthKey);
@@ -1374,8 +1395,9 @@ export function subscribeToUserMonth(
     { includeMetadataChanges: true },
     (docSnap) => {
       const hasPendingWrites = docSnap.metadata.hasPendingWrites;
+      const fromCache = docSnap.metadata.fromCache;
       if (!docSnap.exists()) {
-        onMonthUpdate(null, hasPendingWrites);
+        onMonthUpdate(null, hasPendingWrites, fromCache);
         return;
       }
       const d = docSnap.data() as UserMonthDoc;
@@ -1388,35 +1410,65 @@ export function subscribeToUserMonth(
         variableExpenses: parseVariableExpenses(d.variableExpenses),
         jarAdjustments: (d.jarAdjustments as MonthData['jarAdjustments']) ?? {},
         lastJarAdjustmentLog: d.lastJarAdjustmentLog ?? undefined,
-      }, hasPendingWrites);
+      }, hasPendingWrites, fromCache);
     },
     (error) => {
+      if (onError) {
+        onError(error);
+      }
       handleFirestoreError(error, OperationType.GET, docPath);
     }
   );
 }
 
 /**
- * Sets up real-time listener for global categories
+ * Sets up real-time listener for global categories.
+ * Correctly transmits empty category lists ([]) as valid updates.
+ */
+/**
+ * Processes a Firestore DocumentSnapshot for global categories and forwards to onCategoriesUpdate.
+ * Transmits (categories, fromCache).
+ * Strictly preserves the distinction between nonexistent document and existing document with empty categories list [].
+ */
+export function handleGlobalCategoriesSnapshot(
+  docSnap: {
+    exists: () => boolean;
+    data: () => any;
+    metadata: { fromCache: boolean };
+  },
+  onCategoriesUpdate: (categories: CategoryInfo[], fromCache: boolean) => void
+): void {
+  const fromCache = Boolean(docSnap.metadata.fromCache);
+  if (docSnap.exists()) {
+    const data = docSnap.data() as UserCategoriesDoc;
+    if (data && Array.isArray(data.categories)) {
+      onCategoriesUpdate(data.categories, fromCache);
+    }
+  }
+}
+
+/**
+ * Sets up real-time listener for global categories.
+ * Correctly transmits empty category lists ([]) as valid updates.
  */
 export function subscribeToGlobalCategories(
   userId: string,
-  onCategoriesUpdate: (categories: CategoryInfo[]) => void
+  onCategoriesUpdate: (categories: CategoryInfo[], fromCache: boolean) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe {
   const path = `users/${userId}/categories/global`;
   const docRef = doc(db, 'users', userId, 'categories', 'global');
 
   return onSnapshot(
     docRef,
+    { includeMetadataChanges: true },
     (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as UserCategoriesDoc;
-        if (Array.isArray(data.categories) && data.categories.length > 0) {
-          onCategoriesUpdate(data.categories);
-        }
-      }
+      handleGlobalCategoriesSnapshot(docSnap, onCategoriesUpdate);
     },
     (error) => {
+      if (onError) {
+        onError(error);
+      }
       handleFirestoreError(error, OperationType.GET, path);
     }
   );
