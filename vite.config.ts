@@ -1,12 +1,63 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import fs from 'node:fs';
 import path from 'path';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { APP_VERSION } from './src/utils/version';
+import { APP_VERSION, getNextAppVersion } from './src/utils/version';
 
 const BUILD_ID = Date.now().toString();
 const BUILD_TIME = new Date().toISOString();
+const VERSION_TS_PATH = path.resolve(import.meta.dirname, 'src/utils/version.ts');
+const PUBLIC_VERSION_JSON_PATH = path.resolve(import.meta.dirname, 'public/version.json');
+
+let cachedBuildVersion: string | null = null;
+
+function readCurrentVersionFromDisk(): string {
+  try {
+    const content = fs.readFileSync(VERSION_TS_PATH, 'utf8');
+    const match = content.match(/export const APP_VERSION\s*=\s*'([^']+)'/);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  } catch {
+    // Fallback to imported APP_VERSION
+  }
+  return APP_VERSION;
+}
+
+function advanceVersionOnBuild(): string {
+  if (cachedBuildVersion) {
+    return cachedBuildVersion;
+  }
+
+  const currentVersion = readCurrentVersionFromDisk();
+  const nextVersion = getNextAppVersion(currentVersion);
+
+  try {
+    const content = fs.readFileSync(VERSION_TS_PATH, 'utf8');
+    const updatedContent = content.replace(
+      /export const APP_VERSION\s*=\s*'[^']+'/,
+      `export const APP_VERSION = '${nextVersion}'`
+    );
+    fs.writeFileSync(VERSION_TS_PATH, updatedContent, 'utf8');
+  } catch (err) {
+    console.warn('[nita-version-stamp] Could not update src/utils/version.ts:', err);
+  }
+
+  try {
+    fs.writeFileSync(
+      PUBLIC_VERSION_JSON_PATH,
+      `${JSON.stringify({ version: nextVersion, timestamp: BUILD_TIME, app: 'NITA' }, null, 2)}\n`,
+      'utf8'
+    );
+  } catch (err) {
+    console.warn('[nita-version-stamp] Could not update public/version.json:', err);
+  }
+
+  cachedBuildVersion = nextVersion;
+  return nextVersion;
+}
 
 function versionManifestPlugin(buildId: string, buildTime: string, appVersion: string): Plugin {
   return {
@@ -31,7 +82,7 @@ function versionManifestPlugin(buildId: string, buildTime: string, appVersion: s
           res.setHeader('Pragma', 'no-cache');
           res.end(JSON.stringify({
             version: buildId,
-            appVersion,
+            appVersion: readCurrentVersionFromDisk(),
             timestamp: buildTime,
             app: 'NITA',
           }));
@@ -43,17 +94,22 @@ function versionManifestPlugin(buildId: string, buildTime: string, appVersion: s
   };
 }
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
+  const activeVersion =
+    command === 'build' && process.env.DISABLE_AUTO_VERSION_BUMP !== 'true'
+      ? advanceVersionOnBuild()
+      : readCurrentVersionFromDisk();
+
   return {
     define: {
       __APP_BUILD_ID__: JSON.stringify(BUILD_ID),
       __APP_BUILD_TIME__: JSON.stringify(BUILD_TIME),
-      __APP_VERSION__: JSON.stringify(APP_VERSION),
+      __APP_VERSION__: JSON.stringify(activeVersion),
     },
     plugins: [
       react(),
       tailwindcss(),
-      versionManifestPlugin(BUILD_ID, BUILD_TIME, APP_VERSION),
+      versionManifestPlugin(BUILD_ID, BUILD_TIME, activeVersion),
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: 'auto',

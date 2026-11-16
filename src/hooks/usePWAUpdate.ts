@@ -56,9 +56,13 @@ export function usePWAUpdate() {
       if (response.ok) {
         const data = await response.json();
         const currentBuildId = typeof __APP_BUILD_ID__ !== 'undefined' ? __APP_BUILD_ID__ : '';
+        const currentAppVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '';
 
-        // If the server has a different version published than what is currently running
-        if (data.version && currentBuildId && data.version !== currentBuildId) {
+        const hasNewBuildId = Boolean(data.version && currentBuildId && data.version !== currentBuildId);
+        const hasNewAppVersion = Boolean(data.appVersion && currentAppVersion && data.appVersion !== currentAppVersion);
+
+        // If the server has a different build or appVersion published than what is currently running
+        if (hasNewBuildId || hasNewAppVersion) {
           setUpdateAvailable(true);
 
           if (isManual) {
