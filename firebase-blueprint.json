@@ -9,16 +9,20 @@
           "type": "string",
           "description": "Firebase Auth UID matching the document ID"
         },
-        "email": {
+        "id": {
           "type": "string",
+          "description": "Optional client mirror of uid"
+        },
+        "email": {
+          "type": ["string", "null"],
           "description": "Email address of the authenticated user"
         },
         "displayName": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Display name or alias"
         },
         "photoURL": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Profile picture URL"
         },
         "currency": {
@@ -32,6 +36,10 @@
         "onboardingSeen": {
           "type": "boolean",
           "description": "Whether onboarding has been completed or acknowledged"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Immutable ISO timestamp of account creation"
         },
         "updatedAt": {
           "type": "string",
@@ -51,7 +59,7 @@
         },
         "categories": {
           "type": "array",
-          "description": "Array of category definitions with ID, name, and color"
+          "description": "Array of category definitions with ID, label, and color"
         },
         "updatedAt": {
           "type": "string",
@@ -75,19 +83,19 @@
         },
         "year": {
           "type": "number",
-          "description": "Gregorian year"
+          "description": "Gregorian year matching monthKey prefix"
         },
         "month": {
           "type": "number",
-          "description": "Month index 0 to 11"
+          "description": "0-indexed month (0 to 11) matching monthKey suffix"
         },
         "income": {
           "type": "number",
-          "description": "Total monthly income"
+          "description": "Total monthly income (>= 0)"
         },
         "savingsRate": {
           "type": "number",
-          "description": "Savings rate percentage"
+          "description": "Savings rate percentage (0 to 100)"
         },
         "extraDaysPosition": {
           "type": "string",
@@ -105,12 +113,114 @@
           "type": "array",
           "description": "List of daily variable expenses and purchases"
         },
+        "jarAdjustments": {
+          "type": ["object", "null"],
+          "description": "Per-jar budget carry-over adjustments map"
+        },
+        "lastJarAdjustmentLog": {
+          "type": ["object", "null"],
+          "description": "Metadata log of latest jar adjustment transfer"
+        },
+        "currency": {
+          "type": ["string", "null"],
+          "description": "Optional currency snapshot"
+        },
+        "id": {
+          "type": ["string", "null"],
+          "description": "Optional document ID mirror"
+        },
+        "syncStatus": {
+          "type": ["string", "null"],
+          "description": "Optional sync state label"
+        },
+        "isSynced": {
+          "type": ["boolean", "null"],
+          "description": "Optional sync boolean flag"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Immutable ISO timestamp of creation"
+        },
         "updatedAt": {
           "type": "string",
           "description": "ISO timestamp of update"
         }
       },
-      "required": ["userId", "monthKey", "year", "month", "income"]
+      "required": [
+        "userId",
+        "monthKey",
+        "year",
+        "month",
+        "income",
+        "savingsRate",
+        "extraDaysPosition",
+        "categories",
+        "fixedExpenses",
+        "variableExpenses"
+      ]
+    },
+    "LegacyAccount": {
+      "title": "LegacyAccount",
+      "description": "Backend-only legacy credential record (migrated lazily via Cloud Functions Admin SDK; never client-accessible)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "usernameLower": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "salt": { "type": "string" },
+        "migrated": { "type": "boolean" },
+        "migratedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "usernameLower"]
+    },
+    "AccountSecret": {
+      "title": "AccountSecret",
+      "description": "Backend-only scrypt_v1 credential store managed exclusively by Cloud Functions Admin SDK",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "usernameLower": { "type": "string" },
+        "kdfVersion": { "type": "string" },
+        "kdfParams": { "type": "object" },
+        "salt": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "sessionEpoch": { "type": "number" },
+        "migratedFrom": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "username", "usernameLower", "kdfVersion", "kdfParams", "salt", "passwordHash", "sessionEpoch"]
+    },
+    "UserSecurity": {
+      "title": "UserSecurity",
+      "description": "Backend-only authoritative minimum session epoch per usr_* account; read by Firestore Rules via get()/exists(), written only by Admin SDK",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "usernameLower": { "type": "string" },
+        "minSessionEpoch": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "usernameLower", "minSessionEpoch"]
+    },
+    "AuthRateLimit": {
+      "title": "AuthRateLimit",
+      "description": "Backend-only abuse and brute-force rate-limit bucket managed exclusively by Cloud Functions Admin SDK",
+      "type": "object",
+      "properties": {
+        "scope": { "type": "string" },
+        "action": { "type": "string" },
+        "attemptsInWindow": { "type": "number" },
+        "windowStartedAtMs": { "type": "number" },
+        "blockedUntilMs": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["scope", "action", "attemptsInWindow", "windowStartedAtMs", "blockedUntilMs"]
     }
   },
   "firestore": {
@@ -125,6 +235,22 @@
     "/users/{userId}/months/{monthKey}": {
       "schema": "MonthData",
       "description": "Financial month record containing income, savings, fixed expenses, and daily movements"
+    },
+    "/accounts/{usernameLower}": {
+      "schema": "LegacyAccount",
+      "description": "Admin-SDK-only legacy accounts collection (client access completely denied)"
+    },
+    "/accountSecrets/{usernameLower}": {
+      "schema": "AccountSecret",
+      "description": "Admin-SDK-only scrypt_v1 secrets collection (client access completely denied)"
+    },
+    "/userSecurity/{uid}": {
+      "schema": "UserSecurity",
+      "description": "Admin-SDK-only session epoch revocation state (client access completely denied)"
+    },
+    "/authRateLimits/{bucketKey}": {
+      "schema": "AuthRateLimit",
+      "description": "Admin-SDK-only rate-limiting buckets (client access completely denied)"
     }
   }
 }

@@ -2108,12 +2108,12 @@ describe('NITA — Verificación de Propagación de Metadatos y Persistencia (Pu
     assert.equal(controller.hasLocalStorageFailure(), false, 'No debe registrarse fallo de almacenamiento');
   });
 
-  test('17. verifyUserAuthorization: autoriza usuarios con cuenta de usuario y contraseña cuando la sesión de Firebase tradicional no está presente', () => {
-    // Usuario válido con cuenta personalizada (ej: usr_nicocanch10)
+  test('17. verifyUserAuthorization: rechaza escrituras sin sesión activa de Firebase Auth incluso para cuentas usr_*', () => {
     const validUserId = 'usr_nicocanch10';
-    assert.doesNotThrow(() => {
+    // En Etapa 2A.2 las cuentas usr_* requieren sesión real de Firebase Authentication (auth.currentUser)
+    assert.throws(() => {
       verifyUserAuthorization(validUserId);
-    }, 'No debe lanzar error de autorización cuando el userId es un identificador válido sin sesión de Google');
+    }, /no hay sesión activa de Firebase Authentication/, 'Debe rechazar escrituras cuando auth.currentUser es null');
 
     // Identificador vacío o nulo debe ser rechazado
     assert.throws(() => {

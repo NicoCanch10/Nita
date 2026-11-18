@@ -8,6 +8,7 @@ import {
   Unsubscribe 
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { isSyncSessionValidatedForUser } from '../lib/syncSessionGate';
 import { 
   BudgetState, 
   MonthData, 
@@ -984,15 +985,17 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs = 25000): Promise<
 
 /**
  * Valida la autorización de escritura para el recurso de un usuario en Firestore.
- * Compatible tanto con cuentas de usuario/contraseña (donde la sesión de usuario activa
- * reside en el contexto de la aplicación) como con sesiones activas de Firebase Auth.
+ * Tanto las cuentas Google como las cuentas propias NITA (`usr_*`) operan con sesión
+ * real de Firebase Authentication (`auth.currentUser`), por lo que se exige sesión activa coincidente.
  */
 export function verifyUserAuthorization(userId: string): void {
   if (!userId || typeof userId !== 'string' || userId.trim() === '') {
     throw new Error(`Escritura no autorizada en Firestore: identificador de usuario inválido (${userId})`);
   }
-  // Si Firebase Auth tiene un usuario activo con un UID diferente, rechazar por conflicto de identidad
-  if (auth.currentUser && auth.currentUser.uid !== userId) {
+  if (!auth.currentUser) {
+    throw new Error(`Escritura no autorizada en Firestore: no hay sesión activa de Firebase Authentication para el recurso (${userId})`);
+  }
+  if (auth.currentUser.uid !== userId) {
     throw new Error(`Escritura no autorizada en Firestore: la sesión de Firebase (${auth.currentUser.uid}) no coincide con el recurso (${userId})`);
   }
 }
@@ -1261,20 +1264,49 @@ export function reconcileMonthData(
   };
 }
 
+export interface ProcessPendingSyncQueueOptions {
+  authUser?: { uid: string } | null;
+  isSessionValidated?: boolean;
+  saveMonthFn?: (
+    userId: string,
+    monthKey: string,
+    year: number,
+    month: number,
+    data: MonthData
+  ) => Promise<void>;
+  saveCategoriesFn?: (userId: string, categories: CategoryInfo[]) => Promise<void>;
+  savePreferencesFn?: (
+    userId: string,
+    preferences: { currency?: CurrencyCode; language?: string }
+  ) => Promise<void>;
+}
+
 /**
  * Processes and flushes all pending offline sync items to Google Firestore.
  * Automatically runs when internet connectivity is re-established, on window focus,
- * or upon app launch.
+ * or upon app launch. Fails closed unless connectivity, matching authenticated UID,
+ * and online-validated session state are all confirmed.
  */
 export async function processPendingSyncQueue(
-  userId: string
+  userId: string,
+  options?: ProcessPendingSyncQueueOptions
 ): Promise<{ syncedCount: number; remainingCount: number }> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     const q = getPendingSyncQueue(userId);
     return { syncedCount: 0, remainingCount: q.length };
   }
 
-  if (!userId || typeof userId !== 'string' || (auth.currentUser && auth.currentUser.uid !== userId)) {
+  const activeAuthUser = options?.authUser !== undefined ? options.authUser : auth.currentUser;
+  if (!userId || typeof userId !== 'string' || !activeAuthUser || activeAuthUser.uid !== userId) {
+    const q = getPendingSyncQueue(userId);
+    return { syncedCount: 0, remainingCount: q.length };
+  }
+
+  const sessionValidated =
+    options?.isSessionValidated !== undefined
+      ? options.isSessionValidated
+      : isSyncSessionValidatedForUser(userId);
+  if (!sessionValidated) {
     const q = getPendingSyncQueue(userId);
     return { syncedCount: 0, remainingCount: q.length };
   }
@@ -1283,6 +1315,10 @@ export async function processPendingSyncQueue(
   if (queue.length === 0) {
     return { syncedCount: 0, remainingCount: 0 };
   }
+
+  const saveMonthFn = options?.saveMonthFn ?? saveMonthToFirestoreSerialized;
+  const saveCategoriesFn = options?.saveCategoriesFn ?? saveGlobalCategoriesToFirestore;
+  const savePreferencesFn = options?.savePreferencesFn ?? saveUserPreferencesToFirestore;
 
   let synced = 0;
   for (const item of queue) {
@@ -1295,19 +1331,19 @@ export async function processPendingSyncQueue(
       const itemOpId = currentItem.opId;
 
       if (currentItem.type === 'month' && currentItem.monthKey && currentItem.data && typeof currentItem.year === 'number' && typeof currentItem.month === 'number') {
-        await saveMonthToFirestoreSerialized(currentItem.userId, currentItem.monthKey, currentItem.year, currentItem.month, currentItem.data);
+        await saveMonthFn(currentItem.userId, currentItem.monthKey, currentItem.year, currentItem.month, currentItem.data);
         const removed = removePendingSyncItemIfMatch(currentItem.id, itemOpId);
         if (removed) {
           synced++;
         }
       } else if (currentItem.type === 'categories' && currentItem.categories) {
-        await saveGlobalCategoriesToFirestore(currentItem.userId, currentItem.categories);
+        await saveCategoriesFn(currentItem.userId, currentItem.categories);
         const removed = removePendingSyncItemIfMatch(currentItem.id, itemOpId);
         if (removed) {
           synced++;
         }
       } else if (currentItem.type === 'preferences' && currentItem.preferences) {
-        await saveUserPreferencesToFirestore(currentItem.userId, currentItem.preferences);
+        await savePreferencesFn(currentItem.userId, currentItem.preferences);
         const removed = removePendingSyncItemIfMatch(currentItem.id, itemOpId);
         if (removed) {
           synced++;

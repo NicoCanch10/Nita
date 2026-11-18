@@ -1,0 +1,22 @@
+{
+  "name": "nita-functions",
+  "private": true,
+  "description": "NITA Backend Cloud Functions Gen 2 para autenticación segura y migración de credenciales usr_*",
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "firebase-admin": "^14.5.1",
+    "firebase-functions": "^7.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "^5.8.3"
+  }
+}

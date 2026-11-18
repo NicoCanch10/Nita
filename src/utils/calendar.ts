@@ -29,6 +29,155 @@ export function getExactWeeksInMonth(year: number, month: number): number {
   return days / 7;
 }
 
+export const FIXED_EXPENSE_JAR_OFFSET_KEY_BASE = 100;
+
+export interface MonthJarRange {
+  number: number;
+  title: string;
+  startDay: number;
+  endDay: number;
+  daysCount: number;
+  isExtraDaysJar: boolean;
+}
+
+export function getMonthJarRanges(
+  year: number,
+  month: number,
+  extraDaysPosition: ExtraDaysPosition = 'end',
+  labels?: {
+    extraDaysTitle?: string;
+    weekPrefix?: string;
+  }
+): MonthJarRange[] {
+  const daysInMonth = getDaysInMonth(year, month);
+  const extraDays = Math.max(0, daysInMonth - 28);
+  const extraDaysTitle = labels?.extraDaysTitle || 'Días Extras';
+  const weekPrefix = labels?.weekPrefix || 'Semana';
+
+  const jar1Start = extraDaysPosition === 'start' ? (extraDays > 0 ? 1 : 0) : (extraDays > 0 ? 29 : 0);
+  const jar1End = extraDaysPosition === 'start' ? (extraDays > 0 ? extraDays : 0) : (extraDays > 0 ? daysInMonth : 0);
+
+  const extraDaysRange: MonthJarRange = {
+    number: 1,
+    title: extraDaysTitle,
+    startDay: jar1Start,
+    endDay: jar1End,
+    daysCount: extraDays,
+    isExtraDaysJar: true,
+  };
+
+  if (extraDaysPosition === 'start') {
+    const offset = extraDays;
+    return [
+      extraDaysRange,
+      { number: 2, title: `${weekPrefix} 1`, startDay: offset + 1, endDay: offset + 7, daysCount: 7, isExtraDaysJar: false },
+      { number: 3, title: `${weekPrefix} 2`, startDay: offset + 8, endDay: offset + 14, daysCount: 7, isExtraDaysJar: false },
+      { number: 4, title: `${weekPrefix} 3`, startDay: offset + 15, endDay: offset + 21, daysCount: 7, isExtraDaysJar: false },
+      { number: 5, title: `${weekPrefix} 4`, startDay: offset + 22, endDay: daysInMonth, daysCount: 7, isExtraDaysJar: false },
+    ];
+  }
+
+  return [
+    { number: 2, title: `${weekPrefix} 1`, startDay: 1, endDay: 7, daysCount: 7, isExtraDaysJar: false },
+    { number: 3, title: `${weekPrefix} 2`, startDay: 8, endDay: 14, daysCount: 7, isExtraDaysJar: false },
+    { number: 4, title: `${weekPrefix} 3`, startDay: 15, endDay: 21, daysCount: 7, isExtraDaysJar: false },
+    { number: 5, title: `${weekPrefix} 4`, startDay: 22, endDay: 28, daysCount: 7, isExtraDaysJar: false },
+    extraDaysRange,
+  ];
+}
+
+export function hasOverbudgetJarAdjustments(jarAdjustments?: Record<number, number>): boolean {
+  if (!jarAdjustments) return false;
+  return [1, 2, 3, 4, 5].some(num => Math.abs(Number(jarAdjustments[num]) || 0) > 0.005);
+}
+
+export function clearOverbudgetJarAdjustments(
+  jarAdjustments?: Record<number, number>
+): Record<number, number> | undefined {
+  if (!jarAdjustments) return undefined;
+  const next: Record<number, number> = {};
+  for (const [rawKey, val] of Object.entries(jarAdjustments)) {
+    const numKey = Number(rawKey);
+    if (numKey >= 1 && numKey <= 5) continue;
+    if (typeof val === 'number' && !isNaN(val) && Math.abs(val) >= 1e-6) {
+      next[numKey] = val;
+    }
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/**
+ * Cuando un gasto fijo se modifica dentro del mes en curso (ej. día 12),
+ * congela la asignación de los frascos ya finalizados (endDay < referenceDay)
+ * y traslada la totalidad de la variación neta hacia los frascos presentes y futuros
+ * en proporción a sus días.
+ */
+export function calculateMidMonthFixedExpenseJarAdjustments(
+  year: number,
+  month: number,
+  previousRemaining: number,
+  nextRemaining: number,
+  extraDaysPosition: ExtraDaysPosition = 'end',
+  currentJarAdjustments?: Record<number, number>,
+  referenceDay?: number | null
+): Record<number, number> | undefined {
+  const netRemainingDelta = nextRemaining - previousRemaining;
+  if (Math.abs(netRemainingDelta) < 1e-9) {
+    return currentJarAdjustments;
+  }
+
+  const effectiveDay = referenceDay !== undefined ? referenceDay : getCurrentDayIfActive(year, month);
+  if (effectiveDay === null || effectiveDay <= 0) {
+    return currentJarAdjustments;
+  }
+
+  const daysInMonth = getDaysInMonth(year, month);
+  if (daysInMonth <= 0) {
+    return currentJarAdjustments;
+  }
+
+  const activeJars = getMonthJarRanges(year, month, extraDaysPosition).filter(j => j.daysCount > 0);
+  const pastJars = activeJars.filter(j => j.endDay < effectiveDay);
+  const presentAndFutureJars = activeJars.filter(j => j.endDay >= effectiveDay);
+
+  if (pastJars.length === 0 || presentAndFutureJars.length === 0) {
+    return currentJarAdjustments;
+  }
+
+  const totalPastDays = pastJars.reduce((sum, j) => sum + j.daysCount, 0);
+  const totalFutureDays = presentAndFutureJars.reduce((sum, j) => sum + j.daysCount, 0);
+  if (totalPastDays <= 0 || totalFutureDays <= 0) {
+    return currentJarAdjustments;
+  }
+
+  const compensationFromPast = netRemainingDelta * (totalPastDays / daysInMonth);
+  const nextAdjustments: Record<number, number> = { ...(currentJarAdjustments || {}) };
+
+  for (const p of pastJars) {
+    const autoShiftPast = netRemainingDelta * (p.daysCount / daysInMonth);
+    const key = FIXED_EXPENSE_JAR_OFFSET_KEY_BASE + p.number;
+    const updatedVal = (nextAdjustments[key] || 0) - autoShiftPast;
+    if (Math.abs(updatedVal) < 1e-6) {
+      delete nextAdjustments[key];
+    } else {
+      nextAdjustments[key] = updatedVal;
+    }
+  }
+
+  for (const f of presentAndFutureJars) {
+    const shareOfCompensation = compensationFromPast * (f.daysCount / totalFutureDays);
+    const key = FIXED_EXPENSE_JAR_OFFSET_KEY_BASE + f.number;
+    const updatedVal = (nextAdjustments[key] || 0) + shareOfCompensation;
+    if (Math.abs(updatedVal) < 1e-6) {
+      delete nextAdjustments[key];
+    } else {
+      nextAdjustments[key] = updatedVal;
+    }
+  }
+
+  return Object.keys(nextAdjustments).length > 0 ? nextAdjustments : undefined;
+}
+
 /**
  * Calculates the exact 5-jar distribution requested by the user:
  * - El mes se divide en 5 frascos:
@@ -58,11 +207,7 @@ export function calculateFiveJars(
   const restAmount = baseAmount - jar1Amount;
   const weeklyJarAmount = restAmount / 4;
 
-  const extraDaysTitle = labels?.extraDaysTitle || 'Días Extras';
-  const weekPrefix = labels?.weekPrefix || 'Semana';
   const noExtraDaysSubtitle = labels?.noExtraDaysSubtitle || 'Sin días extras (mes exacto de 28 días)';
-  const daysUnitSingular = labels?.daysCountSingular || 'día';
-  const daysUnitPlural = labels?.daysCountPlural || 'días';
 
   const helperFilterSpent = (startDay: number, endDay: number) => {
     if (startDay <= 0 || endDay <= 0) return 0;
@@ -75,101 +220,35 @@ export function calculateFiveJars(
       .reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
   };
 
-  const jars: Frasco[] = [];
+  const ranges = getMonthJarRanges(year, month, extraDaysPosition, labels);
+  const jars: Frasco[] = ranges.map(range => {
+    const spent = helperFilterSpent(range.startDay, range.endDay);
+    const overbudgetAdj = (jarAdjustments && jarAdjustments[range.number]) || 0;
+    const fixedExpenseAdj =
+      (jarAdjustments && jarAdjustments[FIXED_EXPENSE_JAR_OFFSET_KEY_BASE + range.number]) || 0;
+    const jarBaseAmount = range.isExtraDaysJar ? jar1Amount : weeklyJarAmount;
+    const effectiveAmount = Math.max(0, jarBaseAmount + fixedExpenseAdj + overbudgetAdj);
 
-  const jar1Start = extraDaysPosition === 'start' ? (extraDays > 0 ? 1 : 0) : (extraDays > 0 ? 29 : 0);
-  const jar1End = extraDaysPosition === 'start' ? (extraDays > 0 ? extraDays : 0) : (extraDays > 0 ? daysInMonth : 0);
-  const jar1Spent = helperFilterSpent(jar1Start, jar1End);
-  const jar1Adj = (jarAdjustments && jarAdjustments[1]) || 0;
-  const effectiveJar1Amount = Math.max(0, jar1Amount + jar1Adj);
-
-  const extraDaysJar: Frasco = {
-    number: 1,
-    title: extraDaysTitle,
-    subtitle: extraDays > 0 
-      ? `Días ${jar1Start} al ${jar1End}`
-      : noExtraDaysSubtitle,
-    startDay: jar1Start,
-    endDay: jar1End,
-    daysCount: extraDays,
-    formulaDescription: extraDays > 0 
-      ? `(Gastos Variables / ${daysInMonth}) × ${extraDays}`
-      : '0 (28 días)',
-    amount: effectiveJar1Amount,
-    spent: jar1Spent,
-    remaining: effectiveJar1Amount - jar1Spent,
-    isExtraDaysJar: true,
-    adjustment: jar1Adj,
-    baseAmount: jar1Amount,
-  };
-
-  if (extraDaysPosition === 'start') {
-    // Si es para los primeros días del mes: Días Extras va adelante de todo
-    jars.push(extraDaysJar);
-
-    // Semanas 1 a 4 después de los días extras
-    const offset = extraDays;
-    const weekRanges = [
-      { num: 2, weekLabel: `${weekPrefix} 1`, start: offset + 1, end: offset + 7 },
-      { num: 3, weekLabel: `${weekPrefix} 2`, start: offset + 8, end: offset + 14 },
-      { num: 4, weekLabel: `${weekPrefix} 3`, start: offset + 15, end: offset + 21 },
-      { num: 5, weekLabel: `${weekPrefix} 4`, start: offset + 22, end: daysInMonth },
-    ];
-
-    weekRanges.forEach(w => {
-      const spent = helperFilterSpent(w.start, w.end);
-      const adj = (jarAdjustments && jarAdjustments[w.num]) || 0;
-      const effectiveWeeklyAmount = Math.max(0, weeklyJarAmount + adj);
-      jars.push({
-        number: w.num,
-        title: w.weekLabel,
-        subtitle: `Días ${w.start} al ${w.end}`,
-        startDay: w.start,
-        endDay: w.end,
-        daysCount: 7,
-        formulaDescription: '(Gastos Variables - Días Extras) / 4',
-        amount: effectiveWeeklyAmount,
-        spent,
-        remaining: effectiveWeeklyAmount - spent,
-        isExtraDaysJar: false,
-        adjustment: adj,
-        baseAmount: weeklyJarAmount,
-      });
-    });
-
-  } else {
-    // Si es para los últimos días del mes: Semanas 1 a 4 primero (días 1 al 28)
-    const weekRanges = [
-      { num: 2, weekLabel: `${weekPrefix} 1`, start: 1, end: 7 },
-      { num: 3, weekLabel: `${weekPrefix} 2`, start: 8, end: 14 },
-      { num: 4, weekLabel: `${weekPrefix} 3`, start: 15, end: 21 },
-      { num: 5, weekLabel: `${weekPrefix} 4`, start: 22, end: 28 },
-    ];
-
-    weekRanges.forEach(w => {
-      const spent = helperFilterSpent(w.start, w.end);
-      const adj = (jarAdjustments && jarAdjustments[w.num]) || 0;
-      const effectiveWeeklyAmount = Math.max(0, weeklyJarAmount + adj);
-      jars.push({
-        number: w.num,
-        title: w.weekLabel,
-        subtitle: `Días ${w.start} al ${w.end}`,
-        startDay: w.start,
-        endDay: w.end,
-        daysCount: 7,
-        formulaDescription: '(Gastos Variables - Días Extras) / 4',
-        amount: effectiveWeeklyAmount,
-        spent,
-        remaining: effectiveWeeklyAmount - spent,
-        isExtraDaysJar: false,
-        adjustment: adj,
-        baseAmount: weeklyJarAmount,
-      });
-    });
-
-    // Detrás de todo: Días Extras va al final
-    jars.push(extraDaysJar);
-  }
+    return {
+      number: range.number,
+      title: range.title,
+      subtitle: range.isExtraDaysJar
+        ? (extraDays > 0 ? `Días ${range.startDay} al ${range.endDay}` : noExtraDaysSubtitle)
+        : `Días ${range.startDay} al ${range.endDay}`,
+      startDay: range.startDay,
+      endDay: range.endDay,
+      daysCount: range.daysCount,
+      formulaDescription: range.isExtraDaysJar
+        ? (extraDays > 0 ? `(Gastos Variables / ${daysInMonth}) × ${extraDays}` : '0 (28 días)')
+        : '(Gastos Variables - Días Extras) / 4',
+      amount: effectiveAmount,
+      spent,
+      remaining: effectiveAmount - spent,
+      isExtraDaysJar: range.isExtraDaysJar,
+      adjustment: overbudgetAdj,
+      baseAmount: jarBaseAmount,
+    };
+  });
 
   return {
     calculationBaseType,

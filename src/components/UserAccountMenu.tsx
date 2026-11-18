@@ -17,7 +17,8 @@ export const UserAccountMenu: React.FC = () => {
     signOutUser, 
     authError, 
     isOnline, 
-    isOfflineSession 
+    isOfflineSession,
+    isFirebaseAuthActive,
   } = useAuth();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -33,7 +34,7 @@ export const UserAccountMenu: React.FC = () => {
   }, [isOpen, user]);
 
   const handleManualSyncPending = async () => {
-    if (!user) return;
+    if (!user || !isOnline || isOfflineSession || !isFirebaseAuthActive) return;
     try {
       setIsSyncingPending(true);
       const res = await processPendingSyncQueue(user.uid);

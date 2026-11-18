@@ -1,6 +1,7 @@
-name: NITA Firestore Security & Rules CI
+name: NITA Firestore Security, Functions & Auth Emulator CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -16,8 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-suite:
-    name: Security Isolation & Firestore Rules
+  emulator-security-suite:
+    name: Firestore Rules, Functions & Auth Emulator Suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -25,35 +26,69 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Setup Node.js 22 (LTS)
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Setup Java 21 (Temurin)
+      - name: Setup Java 21 (Temurin LTS)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install Project Dependencies
+      - name: Verify Runtimes
+        run: |
+          node -v
+          java -version
+
+      - name: Install Root Dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install & Build Cloud Functions
+        run: |
+          npm --prefix functions ci
+          npm --prefix functions run lint
+          npm --prefix functions run build
+
       - name: Install Firebase CLI Tools
-        run: npm install -g firebase-tools@latest
+        run: npm install -g firebase-tools@15
 
-      - name: Run Security Isolation Tests (Local Storage Protection)
-        run: npx tsx --test tests/security_isolation.test.ts
+      - name: Run Non-Emulator Security & Auth Unit Tests
+        run: |
+          npx tsx --test \
+            tests/security_isolation.test.ts \
+            tests/etapa2a22_session_and_legacy_recovery.test.ts \
+            tests/functions_crypto.test.ts \
+            tests/functions_ip_extraction.test.ts \
+            tests/username_password_auth.test.ts
 
-      - name: Run Firestore Security Rules Tests (Emulator Suite - Strict Mode)
+      - name: Run Firestore Security Rules Tests (Emulator - Strict Mode)
         env:
           FIREBASE_PROJECT_ID: "demo-nita-ci-test"
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
           STRICT_RULES_EMULATOR: "true"
         run: |
-          firebase emulators:exec --only firestore --project demo-nita-ci-test "npx tsx --test tests/firestore_rules_emulator.test.ts"
+          firebase emulators:exec --only firestore --project demo-nita-ci-test \
+            "npx tsx --test tests/firestore_rules_emulator.test.ts"
+
+      - name: Run Cloud Functions & Frontend Auth Integration Tests (Local Emulators Only)
+        env:
+          FIREBASE_PROJECT_ID: "demo-nita-etapa2a1"
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+          FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099"
+          FUNCTIONS_EMULATOR_HOST: "127.0.0.1:5001"
+          NITA_FIRESTORE_DATABASE_ID: "ai-studio-distribuidordedi-aff91045-91e1-4730-8049-ab5f53276b3f"
+          NITA_HASH_PEPPER: "nita-test-emulator-pepper-0123456789"
+          NITA_USE_FIREBASE_EMULATORS: "true"
+          NITA_EMULATOR_PROJECT_ID: "demo-nita-etapa2a1"
+        run: |
+          trap 'rm -f functions/.secret.local' EXIT
+          printf 'NITA_HASH_PEPPER=%s\n' "$NITA_HASH_PEPPER" > functions/.secret.local
+          firebase emulators:exec --only auth,firestore,functions --project demo-nita-etapa2a1 \
+            "npx tsx --test tests/functions_emulator_integration.test.ts && npx tsx --test tests/frontend_auth_integration.test.ts"

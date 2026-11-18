@@ -18,6 +18,9 @@ import {
   getDaysInMonth, 
   calculateMonthDistribution, 
   calculateFiveJars, 
+  calculateMidMonthFixedExpenseJarAdjustments,
+  hasOverbudgetJarAdjustments,
+  clearOverbudgetJarAdjustments,
   getCurrentDayIfActive, 
   MONTH_NAMES_ES 
 } from './utils/calendar';
@@ -56,6 +59,7 @@ import { DueDateAlertSettings, loadAlertSettings } from './utils/notifications';
 import { loadSelectedLanguage, saveSelectedLanguage, getTranslations } from './utils/languages';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
+import { auth } from './lib/firebase';
 import {
   LocalPersistenceController,
   confirmServerInitialSyncPersistence,
@@ -91,23 +95,9 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
-function getStoredUserId(): string | undefined {
-  if (typeof window === 'undefined') return undefined;
-  try {
-    const raw = localStorage.getItem('nita_cached_user');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.uid) return parsed.uid;
-    }
-  } catch {
-    // ignore
-  }
-  return undefined;
-}
-
 function MainApp() {
   // Authentication & Multi-user state (supports logged in user & guest mode without account)
-  const { user, loading: isAuthLoading, isGuestMode, isOnline, isOfflineSession, isFirebaseAuthActive } = useAuth();
+  const { user, isGuestMode, isOnline, isOfflineSession, isFirebaseAuthActive, verifySessionStatus } = useAuth();
   const isRemoteSyncRef = useRef(false);
   const isFlushingRef = useRef(false);
   const pendingExpenseIdsRef = useRef<Set<string>>(new Set());
@@ -169,7 +159,7 @@ function MainApp() {
 
   // Load state strictly isolated for current identity (authenticated user or guest)
   const [initialData] = useState(() => {
-    const effectiveUid = user?.uid || (!isGuestMode ? getStoredUserId() : undefined);
+    const effectiveUid = isGuestMode ? undefined : user?.uid;
     return loadBudgetState(effectiveUid, isGuestMode);
   });
 
@@ -180,7 +170,51 @@ function MainApp() {
   const [monthsData, setMonthsData] = useState<Record<string, MonthData>>(initialData.monthsData);
 
   // Active view tab for focused navigation
-  const [activeTab, setActiveTab] = useState<'all' | 'jars' | 'fixed' | 'daily' | 'health'>('all');
+  type AppTab = 'all' | 'jars' | 'fixed' | 'daily' | 'health';
+  const [activeTab, setActiveTab] = useState<AppTab>('all');
+  const [tabScrollTrigger, setTabScrollTrigger] = useState(0);
+  const pendingTabScrollRef = useRef(false);
+  const stickyHeaderRef = useRef<HTMLDivElement>(null);
+  const desktopTabsRef = useRef<HTMLDivElement>(null);
+  const sectionStartRef = useRef<HTMLDivElement>(null);
+
+  const handleSelectTab = useCallback((tab: AppTab) => {
+    pendingTabScrollRef.current = true;
+    setActiveTab(tab);
+    setTabScrollTrigger(prev => prev + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingTabScrollRef.current) return;
+    pendingTabScrollRef.current = false;
+
+    const rafId = window.requestAnimationFrame(() => {
+      const headerHeight = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
+      const desktopTabsEl = desktopTabsRef.current;
+      const isDesktopTabsVisible = Boolean(
+        desktopTabsEl && desktopTabsEl.getBoundingClientRect().height > 0
+      );
+      const anchorEl = isDesktopTabsVisible ? desktopTabsEl : sectionStartRef.current;
+
+      const targetTop = anchorEl
+        ? Math.max(
+            0,
+            Math.round(anchorEl.getBoundingClientRect().top + window.scrollY - headerHeight - 24)
+          )
+        : 0;
+
+      const prefersReducedMotion =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      window.scrollTo({
+        top: targetTop,
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      });
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [activeTab, tabScrollTrigger]);
 
   // Due date alert preferences (configurable in settings wheel)
   const [alertSettings, setAlertSettings] = useState<DueDateAlertSettings>(() => loadAlertSettings());
@@ -227,7 +261,7 @@ function MainApp() {
   // A-1.5: Inicialización y ciclo de vida de persistencia con vinculación verificable
   const persistenceControllerRef = useRef<LocalPersistenceController>(
     (() => {
-      const effectiveUid = user?.uid || (!isGuestMode ? getStoredUserId() : undefined);
+      const effectiveUid = isGuestMode ? undefined : user?.uid;
       const { dataKey } = resolveStorageKeys(effectiveUid, isGuestMode);
       const hasRecord = Boolean(dataKey && typeof localStorage !== 'undefined' && localStorage.getItem(dataKey));
       return new LocalPersistenceController(effectiveUid, isGuestMode, hasRecord);
@@ -302,7 +336,7 @@ function MainApp() {
     languageRef.current = code;
     saveSelectedLanguage(code);
     if (user) {
-      if (isOnline && !isOfflineSession) {
+      if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
         saveUserPreferencesToFirestore(user.uid, { language: code }).catch(() => {
           enqueuePendingPreferences(user.uid, { language: code });
           setSyncStatus('error');
@@ -333,7 +367,7 @@ function MainApp() {
     const targetVersion = persistenceControllerRef.current.incrementMutationVersion();
     commitBudgetSnapshot(latestMonthsDataRef.current, targetVersion, { currency: newCurrency });
     if (user) {
-      if (isOnline && !isOfflineSession) {
+      if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
         saveUserPreferencesToFirestore(user.uid, { currency: newCurrency }).catch(() => {
           enqueuePendingPreferences(user.uid, { currency: newCurrency });
           setSyncStatus('error');
@@ -360,7 +394,7 @@ function MainApp() {
       return;
     }
 
-    if (!isFirebaseAuthActive) {
+    if (!isFirebaseAuthActive || !auth.currentUser || auth.currentUser.uid !== user.uid) {
       setIsCloudSyncReady(false);
       setSyncStatus('unauthenticated');
       return;
@@ -579,6 +613,10 @@ function MainApp() {
         setIsCloudSyncReady(false);
         isCloudSyncReadyRef.current = false;
         setSyncStatus('error');
+        const code = ((error as { code?: string })?.code || '').toLowerCase();
+        if (code.includes('unauthenticated') || code.includes('permission-denied')) {
+          void verifySessionStatus();
+        }
       }
     );
 
@@ -621,6 +659,10 @@ function MainApp() {
       (error) => {
         if (!isMounted) return;
         console.warn('[Firestore Error en categorías]:', error);
+        const code = ((error as { code?: string })?.code || '').toLowerCase();
+        if (code.includes('unauthenticated') || code.includes('permission-denied')) {
+          void verifySessionStatus();
+        }
       }
     );
 
@@ -658,7 +700,14 @@ function MainApp() {
   // Auto-sincronización instantánea al desbloquear el teléfono o regresar a la pestaña
   useEffect(() => {
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible' && user && isFirebaseAuthActive && isOnline && !isOfflineSession) {
+      if (
+        document.visibilityState === 'visible' &&
+        user &&
+        isFirebaseAuthActive &&
+        isOnline &&
+        !isOfflineSession &&
+        auth.currentUser?.uid === user.uid
+      ) {
         processPendingSyncQueue(user.uid).catch(() => {});
       }
     };
@@ -691,7 +740,7 @@ function MainApp() {
 
   // Sincronización manual forzada e inmediata entre todos los dispositivos del usuario
   const handleManualSync = useCallback(async () => {
-    if (!user || isOfflineSession) return;
+    if (!user || isOfflineSession || !isFirebaseAuthActive || auth.currentUser?.uid !== user.uid) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setSyncStatus('offline');
       return;
@@ -790,13 +839,13 @@ function MainApp() {
     } finally {
       setIsSyncingManual(false);
     }
-  }, [user, isOfflineSession, isGuestMode, currentKey]);
+  }, [user, isOfflineSession, isFirebaseAuthActive, isGuestMode, currentKey]);
 
   // Sincronización con Google Firestore y cola de reintento:
   // Si la sincronización con Google falla o la conexión se interrumpe, se guarda
   // inmediatamente en cola local y se reintenta sincronizar automáticamente en segundo plano.
   useEffect(() => {
-    if (!user || isOfflineSession || !isCloudSyncReady || !isFirebaseAuthActive) return;
+    if (!user || isOfflineSession || !isCloudSyncReady || !isFirebaseAuthActive || auth.currentUser?.uid !== user.uid) return;
 
     const flushQueue = async () => {
       if (isFlushingRef.current) return;
@@ -1007,14 +1056,14 @@ function MainApp() {
           setSyncStatus('error');
         }
 
-        if (isCloudSyncReady && isOnline && !isOfflineSession && isFirebaseAuthActive) {
+        if (isCloudSyncReady && isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
           saveMonthToFirestoreSerialized(user.uid, options.alsoUpdateKey, aYear, aMonth, updatedAlso)
             .then(() => removePendingMonthFromQueue(user.uid, options.alsoUpdateKey!, alsoOpId))
             .catch(() => {});
         }
       }
 
-      if (isCloudSyncReady && isOnline && !isOfflineSession && isFirebaseAuthActive) {
+      if (isCloudSyncReady && isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
         setSyncStatus('syncing');
         saveMonthToFirestoreSerialized(user.uid, targetMonthKey, tYear, tMonth, updatedTarget)
           .then(() => {
@@ -1088,7 +1137,7 @@ function MainApp() {
     unresolvedConflictsRef.current = remaining;
     setActiveConflicts(remaining);
 
-    if (isOnline && !isOfflineSession && isFirebaseAuthActive) {
+    if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
       setSyncStatus('syncing');
       try {
         await saveMonthToFirestoreSerialized(user.uid, monthKey, y, m, localMonth);
@@ -1140,7 +1189,7 @@ function MainApp() {
       return monthsData[nextMonthKey].fixedExpenses;
     }
     try {
-      const stored = loadBudgetState(user?.uid || getStoredUserId(), isGuestMode);
+      const stored = loadBudgetState(isGuestMode ? undefined : user?.uid, isGuestMode);
       if (stored?.monthsData?.[nextMonthKey]?.fixedExpenses?.length) {
         return stored.monthsData[nextMonthKey].fixedExpenses;
       }
@@ -1292,7 +1341,7 @@ function MainApp() {
         currentKey,
         currentData => ({
           ...currentData,
-          jarAdjustments: undefined,
+          jarAdjustments: clearOverbudgetJarAdjustments(currentData.jarAdjustments),
           lastJarAdjustmentLog: undefined,
         }),
         {
@@ -1301,14 +1350,14 @@ function MainApp() {
           alsoMonth: nM,
           alsoUpdater: nextData => ({
             ...nextData,
-            jarAdjustments: undefined,
+            jarAdjustments: clearOverbudgetJarAdjustments(nextData.jarAdjustments),
           }),
         }
       );
     } else {
       updateActiveMonth(m => ({
         ...m,
-        jarAdjustments: undefined,
+        jarAdjustments: clearOverbudgetJarAdjustments(m.jarAdjustments),
         lastJarAdjustmentLog: undefined,
       }));
     }
@@ -1338,7 +1387,7 @@ function MainApp() {
       const updatedList = [...currentGlobal, { ...category }];
       saveGlobalCategories(updatedList, user?.uid, isGuestMode);
       if (user) {
-        if (isOnline && !isOfflineSession) {
+        if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
           saveGlobalCategoriesToFirestore(user.uid, updatedList).catch(() => {
             enqueuePendingCategories(user.uid, updatedList);
             setSyncStatus(isOnline ? 'error' : 'offline');
@@ -1384,7 +1433,7 @@ function MainApp() {
       : [...currentGlobal, { ...(activeMonthData.categories.find(c => c.id === id) || { id, label: id, color, isCustom: true }), color }];
     saveGlobalCategories(updatedGlobal, user?.uid, isGuestMode);
     if (user) {
-      if (isOnline && !isOfflineSession) {
+      if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
         saveGlobalCategoriesToFirestore(user.uid, updatedGlobal).catch(() => {
           enqueuePendingCategories(user.uid, updatedGlobal);
           setSyncStatus(isOnline ? 'error' : 'offline');
@@ -1429,7 +1478,7 @@ function MainApp() {
       : [...currentGlobal, { ...(activeMonthData.categories.find(c => c.id === id) || { id, label, color: '#6366f1', isCustom: true }), label }];
     saveGlobalCategories(updatedGlobal, user?.uid, isGuestMode);
     if (user) {
-      if (isOnline && !isOfflineSession) {
+      if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
         saveGlobalCategoriesToFirestore(user.uid, updatedGlobal).catch(() => {
           enqueuePendingCategories(user.uid, updatedGlobal);
           setSyncStatus(isOnline ? 'error' : 'offline');
@@ -1459,7 +1508,7 @@ function MainApp() {
     const remaining = currentGlobal.filter(c => c.id !== id);
     saveGlobalCategories(remaining, user?.uid, isGuestMode);
     if (user) {
-      if (isOnline && !isOfflineSession) {
+      if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
         saveGlobalCategoriesToFirestore(user.uid, remaining).catch(() => {
           enqueuePendingCategories(user.uid, remaining);
           setSyncStatus(isOnline ? 'error' : 'offline');
@@ -1530,10 +1579,34 @@ function MainApp() {
     modifiedFixedIdsRef.current.set(id, Date.now());
     deletedFixedIdsRef.current.delete(id);
 
-    mutateMonthData(currentKey, currentMonth => ({
-      ...currentMonth,
-      fixedExpenses: (currentMonth.fixedExpenses || []).map(e => e.id === id ? { ...e, ...updatedFields } : e),
-    }));
+    mutateMonthData(currentKey, currentMonth => {
+      const prevFixed = currentMonth.fixedExpenses || [];
+      const nextFixed = prevFixed.map(e => e.id === id ? { ...e, ...updatedFields } : e);
+      const monthIncome = Number(currentMonth.income) || 0;
+      const monthSavings = (monthIncome * (currentMonth.savingsRate ?? 0)) / 100;
+      const prevTotalFixed = prevFixed.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      const nextTotalFixed = nextFixed.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      const prevRemaining = Math.max(0, monthIncome - prevTotalFixed - monthSavings);
+      const nextRemaining = Math.max(0, monthIncome - nextTotalFixed - monthSavings);
+      const [kYear, kMonth] = currentKey.split('-').map(Number);
+      const targetYear = !isNaN(kYear) ? kYear : year;
+      const targetMonth = !isNaN(kMonth) ? kMonth - 1 : month;
+
+      const updatedJarAdjustments = calculateMidMonthFixedExpenseJarAdjustments(
+        targetYear,
+        targetMonth,
+        prevRemaining,
+        nextRemaining,
+        currentMonth.extraDaysPosition || 'end',
+        currentMonth.jarAdjustments
+      );
+
+      return {
+        ...currentMonth,
+        fixedExpenses: nextFixed,
+        jarAdjustments: updatedJarAdjustments,
+      };
+    });
   };
 
   const handleAddVariableExpense = (expense: Omit<VariableExpense, 'id'>) => {
@@ -1670,7 +1743,7 @@ function MainApp() {
     <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col transition-colors">
       
       {/* Unified Sticky Header Container: Header + Ingreso Neto Mensual permanently sticky on mobile and desktop */}
-      <div className="sticky top-0 z-30 w-full shadow-xs bg-white dark:bg-slate-900 transition-colors">
+      <div ref={stickyHeaderRef} className="sticky top-0 z-30 w-full shadow-xs bg-white dark:bg-slate-900 transition-colors">
         <Header
           month={month}
           year={year}
@@ -1715,10 +1788,10 @@ function MainApp() {
 
 
         {/* Desktop Navigation Tabs Bar (Visible únicamente en pantallas medianas y de escritorio: sm en adelante) */}
-        <div className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-1.5 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-xs transition-colors">
+        <div ref={desktopTabsRef} className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-1.5 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-xs transition-colors">
           <button
             type="button"
-            onClick={() => setActiveTab('all')}
+            onClick={() => handleSelectTab('all')}
             className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 xl:px-3 py-2 sm:py-2.5 rounded-xl transition-all cursor-pointer w-full text-center ${
               activeTab === 'all'
                 ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-black'
@@ -1731,7 +1804,7 @@ function MainApp() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('jars')}
+            onClick={() => handleSelectTab('jars')}
             className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 xl:px-3 py-2 sm:py-2.5 rounded-xl transition-all cursor-pointer w-full text-center ${
               activeTab === 'jars'
                 ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-black'
@@ -1744,7 +1817,7 @@ function MainApp() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('fixed')}
+            onClick={() => handleSelectTab('fixed')}
             className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 xl:px-3 py-2 sm:py-2.5 rounded-xl transition-all cursor-pointer w-full text-center ${
               activeTab === 'fixed'
                 ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-black'
@@ -1757,7 +1830,7 @@ function MainApp() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('daily')}
+            onClick={() => handleSelectTab('daily')}
             className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 xl:px-3 py-2 sm:py-2.5 rounded-xl transition-all cursor-pointer w-full text-center ${
               activeTab === 'daily'
                 ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-black'
@@ -1770,7 +1843,7 @@ function MainApp() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('health')}
+            onClick={() => handleSelectTab('health')}
             className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 xl:px-3 py-2 sm:py-2.5 rounded-xl transition-all cursor-pointer w-full text-center col-span-2 sm:col-span-1 ${
               activeTab === 'health'
                 ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-black'
@@ -1783,6 +1856,7 @@ function MainApp() {
         </div>
 
         {/* View Layout Switcher */}
+        <div ref={sectionStartRef}>
         {activeTab === 'all' && (
           <div className="space-y-6">
             {/* Urgent Due Dates Alert Banner (Visible exclusivamente en Vista Completa) */}
@@ -1852,7 +1926,7 @@ function MainApp() {
               month={month}
               onAdjustExceededJar={handleAdjustExceededJar}
               onResetJarAdjustments={handleResetJarAdjustments}
-              hasActiveAdjustments={Boolean(activeMonthData.jarAdjustments && Object.keys(activeMonthData.jarAdjustments).length > 0)}
+              hasActiveAdjustments={hasOverbudgetJarAdjustments(activeMonthData.jarAdjustments)}
               lastAdjustmentLog={activeMonthData.lastJarAdjustmentLog}
             />
 
@@ -1922,7 +1996,7 @@ function MainApp() {
               month={month}
               onAdjustExceededJar={handleAdjustExceededJar}
               onResetJarAdjustments={handleResetJarAdjustments}
-              hasActiveAdjustments={Boolean(activeMonthData.jarAdjustments && Object.keys(activeMonthData.jarAdjustments).length > 0)}
+              hasActiveAdjustments={hasOverbudgetJarAdjustments(activeMonthData.jarAdjustments)}
               lastAdjustmentLog={activeMonthData.lastJarAdjustmentLog}
             />
           </div>
@@ -1984,6 +2058,7 @@ function MainApp() {
             language={language}
           />
         )}
+        </div>
 
       </main>
 
@@ -1997,7 +2072,7 @@ function MainApp() {
           {/* 1. A la izquierda: LOS 5 FRASCOS */}
           <button
             type="button"
-            onClick={() => setActiveTab('jars')}
+            onClick={() => handleSelectTab('jars')}
             aria-label={t.tabJars}
             title={t.tabJars}
             className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${
@@ -2012,7 +2087,7 @@ function MainApp() {
           {/* 2. Seguido a eso: GASTOS FIJOS */}
           <button
             type="button"
-            onClick={() => setActiveTab('fixed')}
+            onClick={() => handleSelectTab('fixed')}
             aria-label={t.tabFixed}
             title={t.tabFixed}
             className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${
@@ -2027,7 +2102,7 @@ function MainApp() {
           {/* 3. En el medio (y un poco más grande en tamaño): VISTA COMPLETA */}
           <button
             type="button"
-            onClick={() => setActiveTab('all')}
+            onClick={() => handleSelectTab('all')}
             aria-label={t.tabAll}
             title={t.tabAll}
             className={`flex items-center justify-center w-14 h-14 rounded-2xl transition-all cursor-pointer active:scale-95 shadow-md -my-1 ${
@@ -2042,7 +2117,7 @@ function MainApp() {
           {/* 4. Seguido a eso: CONSUMOS DIARIOS */}
           <button
             type="button"
-            onClick={() => setActiveTab('daily')}
+            onClick={() => handleSelectTab('daily')}
             aria-label={t.tabDaily}
             title={t.tabDaily}
             className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${
@@ -2057,7 +2132,7 @@ function MainApp() {
           {/* 5. Por último: DIAGNOSTICO & SIMULADOR */}
           <button
             type="button"
-            onClick={() => setActiveTab('health')}
+            onClick={() => handleSelectTab('health')}
             aria-label={t.tabHealth}
             title={t.tabHealth}
             className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all cursor-pointer active:scale-95 ${

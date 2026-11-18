@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.1.5';
+export const APP_VERSION = '1.2.5';
 
 /**
  * Validates that a version string follows NITA's 3-segment format (major >= 1, minor 1..9, patch 1..9).

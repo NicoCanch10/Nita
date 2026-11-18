@@ -47,7 +47,10 @@ import {
   checkHasLegacyUnassignedData,
   exportLegacyDataBackup,
   explicitlyMigrateLegacyDataToUser,
-  getInitialBudgetState
+  getInitialBudgetState,
+  recoverLocalDataSources,
+  enqueuePendingMonth,
+  generateOpId
 } from '../src/utils/storage';
 import { getMonthKey, BudgetState } from '../src/types/budget';
 
@@ -226,5 +229,107 @@ describe('Seguridad NITA - Aislamiento de datos y protección de sesiones', () =
     // La clave del usuario NO debe contener automáticamente los datos legacy
     const userStorage = localStorage.getItem(getUserStorageKey(userLoggedIn));
     assert.notEqual(userStorage, legacyAppContent, 'No debe haber migración automática a la cuenta');
+  });
+
+  test('7. recoverLocalDataSources no importa datos de invitados, legacy ni de otros usuarios o colas ajenas', () => {
+    const userA = 'usr_alice';
+    const userB = 'usr_bob';
+
+    localStorage.setItem(
+      GUEST_STORAGE_KEY,
+      JSON.stringify({
+        month: 10,
+        year: 2026,
+        currency: 'ARS',
+        monthsData: {
+          '2026-11': {
+            income: 888888,
+            savingsRate: 10,
+            extraDaysPosition: 'end',
+            categories: [],
+            fixedExpenses: [{ id: 'g1', name: 'Gasto Invitado', amount: 5000, category: 'other', isPaid: false }],
+            variableExpenses: [],
+          },
+        },
+      })
+    );
+
+    localStorage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify({
+        month: 10,
+        year: 2026,
+        currency: 'USD',
+        monthsData: {
+          '2026-10': {
+            income: 777777,
+            savingsRate: 15,
+            extraDaysPosition: 'end',
+            categories: [],
+            fixedExpenses: [{ id: 'l1', name: 'Gasto Legacy', amount: 4000, category: 'other', isPaid: false }],
+            variableExpenses: [],
+          },
+        },
+      })
+    );
+
+    saveBudgetState(
+      {
+        month: 10,
+        year: 2026,
+        currency: 'ARS',
+        monthsData: {
+          '2026-09': {
+            income: 666666,
+            savingsRate: 5,
+            extraDaysPosition: 'end',
+            categories: [],
+            fixedExpenses: [],
+            variableExpenses: [{ id: 'vb1', date: '2026-09-01', description: 'Gasto Bob', amount: 9000, category: 'other' }],
+          },
+        },
+      },
+      userB,
+      false
+    );
+
+    enqueuePendingMonth(
+      userB,
+      '2026-12',
+      2026,
+      11,
+      {
+        income: 555555,
+        savingsRate: 0,
+        extraDaysPosition: 'end',
+        categories: [],
+        fixedExpenses: [],
+        variableExpenses: [],
+      },
+      generateOpId()
+    );
+
+    enqueuePendingMonth(
+      userA,
+      '2026-08',
+      2026,
+      7,
+      {
+        income: 123000,
+        savingsRate: 10,
+        extraDaysPosition: 'end',
+        categories: [],
+        fixedExpenses: [],
+        variableExpenses: [],
+      },
+      generateOpId()
+    );
+
+    const recoveredA = recoverLocalDataSources(userA);
+    assert.equal(Boolean(recoveredA['2026-11']), false, 'No debe importar mes del modo invitado');
+    assert.equal(Boolean(recoveredA['2026-10']), false, 'No debe importar mes de almacenamiento legacy');
+    assert.equal(Boolean(recoveredA['2026-09']), false, 'No debe importar mes de Cuenta B');
+    assert.equal(Boolean(recoveredA['2026-12']), false, 'No debe importar cola pendiente de Cuenta B');
+    assert.equal(recoveredA['2026-08']?.income, 123000, 'Sí debe recuperar la cola propia de Cuenta A');
   });
 });

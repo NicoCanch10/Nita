@@ -35,8 +35,13 @@ import {
   ChevronUp,
   LogOut,
   Cloud,
-  Check
+  KeyRound,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
+import { validatePasswordFormat } from '../services/authAccountService';
 
 interface SettingsMenuProps {
   currency: CurrencyCode;
@@ -86,7 +91,54 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { isInstalled } = usePWAInstall();
-  const { user, signOutUser, isGuestMode, exitGuestMode, isFirebaseAuthActive } = useAuth();
+  const { user, signOutUser, changePassword, isGuestMode, exitGuestMode, isFirebaseAuthActive, isOnline, isOfflineSession } = useAuth();
+
+  // Password change state (for usr_* password accounts)
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmNewPasswordInput, setConfirmNewPasswordInput] = useState('');
+  const [showChangePasswords, setShowChangePasswords] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
+  const [changePasswordSuccess, setChangePasswordSuccess] = useState<string | null>(null);
+  const isNitaPasswordAccount = Boolean(user && user.uid.startsWith('usr_'));
+
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePasswordError(null);
+    setChangePasswordSuccess(null);
+
+    if (!currentPasswordInput) {
+      setChangePasswordError('Por favor, ingresa tu contraseña actual.');
+      return;
+    }
+
+    const passCheck = validatePasswordFormat(newPasswordInput);
+    if (!passCheck.valid) {
+      setChangePasswordError(passCheck.error || 'La nueva contraseña no es válida.');
+      return;
+    }
+
+    if (newPasswordInput !== confirmNewPasswordInput) {
+      setChangePasswordError('Las nuevas contraseñas no coinciden.');
+      return;
+    }
+
+    try {
+      setIsChangingPassword(true);
+      await changePassword(currentPasswordInput, newPasswordInput);
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmNewPasswordInput('');
+      setChangePasswordSuccess('Contraseña actualizada. Tu sesión actual sigue activa y otras sesiones fueron cerradas.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'No se pudo cambiar la contraseña.';
+      setChangePasswordError(msg);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   // Language state
   const [internalLanguage, setInternalLanguage] = useState(() => loadSelectedLanguage());
@@ -600,6 +652,130 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     <RefreshCw className={`w-3.5 h-3.5 ${isSyncingManual ? 'animate-spin' : ''}`} />
                     <span>{isSyncingManual ? 'Sincronizando con la nube...' : 'Sincronizar datos ahora'}</span>
                   </button>
+                )}
+
+                {isNitaPasswordAccount && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChangePasswordOpen(!isChangePasswordOpen);
+                        setChangePasswordError(null);
+                        setChangePasswordSuccess(null);
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 font-bold rounded-xl transition-colors cursor-pointer text-2xs border border-slate-200 dark:border-slate-700"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>{isChangePasswordOpen ? 'Ocultar cambio de contraseña' : 'Cambiar contraseña'}</span>
+                    </button>
+
+                    {isChangePasswordOpen && (
+                      <form
+                        onSubmit={handlePasswordChangeSubmit}
+                        className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-2.5"
+                      >
+                        {changePasswordError && (
+                          <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-3xs flex items-start gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-500" />
+                            <span>{changePasswordError}</span>
+                          </div>
+                        )}
+                        {changePasswordSuccess && (
+                          <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-3xs flex items-start gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-600" />
+                            <span>{changePasswordSuccess}</span>
+                          </div>
+                        )}
+
+                        {(!isOnline || isOfflineSession || !isFirebaseAuthActive) && (
+                          <p className="text-3xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2">
+                            Necesitas conexión a internet y sesión activa para cambiar tu contraseña.
+                          </p>
+                        )}
+
+                        <div className="space-y-1">
+                          <label className="text-3xs font-bold text-slate-600 dark:text-slate-300">
+                            Contraseña actual
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showChangePasswords ? 'text' : 'password'}
+                              autoComplete="current-password"
+                              value={currentPasswordInput}
+                              onChange={(e) => {
+                                setCurrentPasswordInput(e.target.value);
+                                setChangePasswordError(null);
+                              }}
+                              disabled={isChangingPassword}
+                              placeholder="••••••••"
+                              className="w-full px-2.5 py-1.5 pr-8 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowChangePasswords(!showChangePasswords)}
+                              className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                            >
+                              {showChangePasswords ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-3xs font-bold text-slate-600 dark:text-slate-300">
+                            Nueva contraseña (mín. 6 caracteres)
+                          </label>
+                          <input
+                            type={showChangePasswords ? 'text' : 'password'}
+                            autoComplete="new-password"
+                            value={newPasswordInput}
+                            onChange={(e) => {
+                              setNewPasswordInput(e.target.value);
+                              setChangePasswordError(null);
+                            }}
+                            disabled={isChangingPassword}
+                            placeholder="••••••••"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-3xs font-bold text-slate-600 dark:text-slate-300">
+                            Confirmar nueva contraseña
+                          </label>
+                          <input
+                            type={showChangePasswords ? 'text' : 'password'}
+                            autoComplete="new-password"
+                            value={confirmNewPasswordInput}
+                            onChange={(e) => {
+                              setConfirmNewPasswordInput(e.target.value);
+                              setChangePasswordError(null);
+                            }}
+                            disabled={isChangingPassword}
+                            placeholder="••••••••"
+                            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-500"
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isChangingPassword || !isOnline || isOfflineSession || !isFirebaseAuthActive}
+                          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition-colors cursor-pointer text-2xs disabled:opacity-50 disabled:pointer-events-none"
+                        >
+                          {isChangingPassword ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Actualizando contraseña...</span>
+                            </>
+                          ) : (
+                            <>
+                              <KeyRound className="w-3.5 h-3.5" />
+                              <span>Guardar nueva contraseña</span>
+                            </>
+                          )}
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 )}
 
                 <button

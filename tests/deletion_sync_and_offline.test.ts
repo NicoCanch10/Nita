@@ -227,9 +227,10 @@ describe('Diagnóstico y Corrección de Inicio Offline (PWA)', () => {
     assert.ok(!indexHtmlContent.includes('<meta http-equiv="Pragma" content="no-cache"'), 'index.html no debe prohibir caché por meta');
   });
 
-  test('8. AuthContext inicializa loading en false si el dispositivo está offline y existe usuario en caché', () => {
+  test('8. AuthContext maneja inicio offline sin bloqueo ni habilitación falsa de Firebase Auth', () => {
     const authContextContent = fs.readFileSync(path.resolve(process.cwd(), 'src/context/AuthContext.tsx'), 'utf-8');
-    assert.ok(authContextContent.includes('!navigator.onLine && getInitialCachedUser()'), 'Debe permitir inicio offline inmediato si hay usuario en caché');
-    assert.ok(authContextContent.includes('const safetyTimeoutMs = isOffline ? 1500 : 8000;'), 'Timeout de seguridad debe ser más rápido cuando está offline');
+    assert.ok(authContextContent.includes('const safetyTimeoutMs = isOfflineAtMount ? 1500 : 8000;'), 'Timeout de seguridad debe ser más rápido cuando está offline');
+    assert.ok(authContextContent.includes('fbUser.getIdTokenResult(false)'), 'Debe inspeccionar claims cacheados offline sin exigir red');
+    assert.ok(!authContextContent.includes("if (currentChoice === 'password' || currentChoice === 'offline')"), 'No debe ignorar onAuthStateChanged para cuentas password');
   });
 });

@@ -3,12 +3,14 @@ import {
   getAuth, 
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithCustomToken,
   signOut, 
   User,
   setPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
-  inMemoryPersistence
+  inMemoryPersistence,
+  connectAuthEmulator
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
@@ -18,9 +20,16 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
   setLogLevel,
-  Firestore
+  Firestore,
+  connectFirestoreEmulator
 } from 'firebase/firestore';
+import {
+  getFunctions,
+  connectFunctionsEmulator,
+  Functions
+} from 'firebase/functions';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { clearSyncSessionValidationState } from './syncSessionGate';
 
 // Configure Firestore SDK log level to 'silent' to silence internal IndexedDB lease jitter and sub-millisecond clock drift warnings
 setLogLevel('silent');
@@ -37,13 +46,28 @@ if (typeof window !== 'undefined') {
   };
 }
 
+const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env;
+const nodeEnv = typeof process !== 'undefined' ? process.env : undefined;
+const useEmulatorsEnv =
+  viteEnv?.VITE_USE_FIREBASE_EMULATORS === 'true' || nodeEnv?.NITA_USE_FIREBASE_EMULATORS === 'true';
+const emulatorProjectId = viteEnv?.VITE_EMULATOR_PROJECT_ID || nodeEnv?.NITA_EMULATOR_PROJECT_ID;
+
+const effectiveFirebaseConfig =
+  useEmulatorsEnv && emulatorProjectId && emulatorProjectId.startsWith('demo-')
+    ? {
+        ...firebaseConfig,
+        projectId: emulatorProjectId,
+        authDomain: `${emulatorProjectId}.firebaseapp.com`,
+      }
+    : firebaseConfig;
+
 // Initialize Firebase App
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = getApps().length === 0 ? initializeApp(effectiveFirebaseConfig) : getApp();
 
 // Initialize single Firebase Auth instance
 export const auth = getAuth(app);
 
-// Explicitly configure browserLocalPersistence immediately to ensure Google session survives reloads, app restarts and device reboots
+// Explicitly configure browserLocalPersistence immediately to ensure sessions survive reloads, app restarts and device reboots
 if (typeof window !== 'undefined') {
   setPersistence(auth, browserLocalPersistence).catch((err) => {
     console.warn('[Firebase Auth] Immediate browserLocalPersistence initialization warning:', err);
@@ -89,6 +113,77 @@ try {
 }
 
 export const db = firestoreDb;
+
+// Initialize Cloud Functions Gen 2 instance in us-central1
+export const FUNCTIONS_REGION = 'us-central1';
+export const functions: Functions = getFunctions(app, FUNCTIONS_REGION);
+
+let emulatorsConnected = false;
+
+export interface FirebaseEmulatorConfig {
+  authUrl?: string;
+  firestoreHost?: string;
+  firestorePort?: number;
+  functionsHost?: string;
+  functionsPort?: number;
+}
+
+/**
+ * Connects Firebase Web SDK instances to local emulators strictly when explicitly requested
+ * (e.g. VITE_USE_FIREBASE_EMULATORS=true or test harnesses). Never active in production by default.
+ */
+export function connectFirebaseEmulators(config?: FirebaseEmulatorConfig): void {
+  if (emulatorsConnected) return;
+  emulatorsConnected = true;
+
+  const authUrl = config?.authUrl || 'http://127.0.0.1:9099';
+  const firestoreHost = config?.firestoreHost || '127.0.0.1';
+  const firestorePort = config?.firestorePort ?? 8080;
+  const functionsHost = config?.functionsHost || '127.0.0.1';
+  const functionsPort = config?.functionsPort ?? 5001;
+
+  try {
+    connectAuthEmulator(auth, authUrl, { disableWarnings: true });
+  } catch {
+    // Already connected
+  }
+  try {
+    connectFirestoreEmulator(db, firestoreHost, firestorePort);
+  } catch {
+    // Already connected
+  }
+  try {
+    connectFunctionsEmulator(functions, functionsHost, functionsPort);
+  } catch {
+    // Already connected
+  }
+}
+
+if (useEmulatorsEnv) {
+  const parseHostPort = (raw: string | undefined, fallbackHost: string, fallbackPort: number) => {
+    if (!raw) return { host: fallbackHost, port: fallbackPort };
+    const [h, p] = raw.split(':');
+    return { host: h || fallbackHost, port: Number(p) || fallbackPort };
+  };
+  const fsTarget = parseHostPort(
+    viteEnv?.VITE_FIRESTORE_EMULATOR_HOST || nodeEnv?.FIRESTORE_EMULATOR_HOST,
+    '127.0.0.1',
+    8080
+  );
+  const fnTarget = parseHostPort(
+    viteEnv?.VITE_FUNCTIONS_EMULATOR_HOST || nodeEnv?.FUNCTIONS_EMULATOR_HOST,
+    '127.0.0.1',
+    5001
+  );
+  const authHost = viteEnv?.VITE_AUTH_EMULATOR_HOST || nodeEnv?.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+  connectFirebaseEmulators({
+    authUrl: authHost.startsWith('http') ? authHost : `http://${authHost}`,
+    firestoreHost: fsTarget.host,
+    firestorePort: fsTarget.port,
+    functionsHost: fnTarget.host,
+    functionsPort: fnTarget.port,
+  });
+}
 
 // Operation Types for error tracking conforming to Firebase Skill guidelines
 export enum OperationType {
@@ -181,7 +276,14 @@ export async function signInWithGoogle(): Promise<User> {
   return result.user;
 }
 
+export async function signInWithFirebaseCustomToken(customToken: string): Promise<User> {
+  await ensureAuthPersistence();
+  const result = await signInWithCustomToken(auth, customToken);
+  return result.user;
+}
+
 export async function logOut() {
+  clearSyncSessionValidationState();
   return await signOut(auth);
 }
 

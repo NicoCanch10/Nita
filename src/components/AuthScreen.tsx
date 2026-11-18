@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { 
-  AlertCircle, 
-  Loader2, 
-  UserX, 
-  WifiOff, 
-  Lock, 
-  User as UserIcon, 
-  CheckCircle2, 
-  Eye, 
+import {
+  AlertCircle,
+  Loader2,
+  UserX,
+  WifiOff,
+  Lock,
+  User as UserIcon,
+  Eye,
   EyeOff,
   UserPlus,
   LogIn
@@ -16,13 +15,12 @@ import {
 import { validateUsernameFormat, validatePasswordFormat } from '../services/authAccountService';
 
 export const AuthScreen: React.FC = () => {
-  const { 
+  const {
     signInWithGoogle,
     signInWithUsername,
     registerWithUsername,
-    checkUsernameAvailable,
-    continueWithoutAccount, 
-    authError, 
+    continueWithoutAccount,
+    authError,
     clearAuthError,
     isOnline
   } = useAuth();
@@ -35,8 +33,6 @@ export const AuthScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [isCheckingUsername, setIsCheckingUsername] = useState(false);
-  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'available' | 'taken'>('idle');
 
   const isBusy = isLoading || isGoogleLoading;
 
@@ -51,25 +47,6 @@ export const AuthScreen: React.FC = () => {
       setLocalError(msg);
     } finally {
       setIsGoogleLoading(false);
-    }
-  };
-
-  const handleUsernameBlur = async () => {
-    if (activeTab !== 'register') return;
-    const trimmed = username.trim();
-    const format = validateUsernameFormat(trimmed);
-    if (!format.valid) {
-      setUsernameStatus('idle');
-      return;
-    }
-    try {
-      setIsCheckingUsername(true);
-      const isAvailable = await checkUsernameAvailable(trimmed);
-      setUsernameStatus(isAvailable ? 'available' : 'taken');
-    } catch {
-      setUsernameStatus('idle');
-    } finally {
-      setIsCheckingUsername(false);
     }
   };
 
@@ -190,7 +167,7 @@ export const AuthScreen: React.FC = () => {
             <WifiOff className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
             <div className="text-2xs leading-snug">
               <span className="font-bold block">Dispositivo sin conexión (Offline)</span>
-              Puedes usar una cuenta guardada en este dispositivo o <strong>"Ingresar sin cuenta"</strong>.
+              Para iniciar sesión o crear una cuenta necesitas internet, o puedes usar <strong>"Ingresar sin cuenta"</strong>.
             </div>
           </div>
         )}
@@ -249,7 +226,6 @@ export const AuthScreen: React.FC = () => {
               setActiveTab('login');
               setLocalError(null);
               clearAuthError();
-              setUsernameStatus('idle');
             }}
             className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'login'
@@ -267,7 +243,6 @@ export const AuthScreen: React.FC = () => {
               setActiveTab('register');
               setLocalError(null);
               clearAuthError();
-              setUsernameStatus('idle');
             }}
             className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'register'
@@ -289,25 +264,6 @@ export const AuthScreen: React.FC = () => {
           <div className="space-y-1">
             <label className="text-2xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
               <span>Nombre de usuario</span>
-              {activeTab === 'register' && (
-                <span className="text-[10px] lowercase text-slate-400">
-                  {usernameStatus === 'available' && (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> disponible
-                    </span>
-                  )}
-                  {usernameStatus === 'taken' && (
-                    <span className="text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> ya existe
-                    </span>
-                  )}
-                  {isCheckingUsername && (
-                    <span className="text-blue-500 flex items-center gap-1">
-                      <Loader2 className="w-3 h-3 animate-spin" /> verificando...
-                    </span>
-                  )}
-                </span>
-              )}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -321,18 +277,10 @@ export const AuthScreen: React.FC = () => {
                 value={username}
                 onChange={(e) => {
                   setUsername(e.target.value.replace(/[^a-zA-Z0-9_.-]/g, ''));
-                  setUsernameStatus('idle');
                   setLocalError(null);
                 }}
-                onBlur={handleUsernameBlur}
                 placeholder="NITA123; Usuario1; User20"
-                className={`w-full pl-9 pr-3 py-2.5 rounded-xl border text-sm font-semibold bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden transition-all ${
-                  usernameStatus === 'available'
-                    ? 'border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
-                    : usernameStatus === 'taken'
-                    ? 'border-rose-500 focus:ring-2 focus:ring-rose-500/20'
-                    : 'border-slate-200 dark:border-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
-                }`}
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-semibold bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                 disabled={isLoading}
               />
             </div>
@@ -408,7 +356,7 @@ export const AuthScreen: React.FC = () => {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isBusy || (activeTab === 'register' && usernameStatus === 'taken')}
+            disabled={isBusy}
             className="w-full mt-2 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-extrabold text-sm shadow-sm transition-all disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
           >
             {isLoading ? (

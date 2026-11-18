@@ -899,8 +899,8 @@ describe('NITA — Pruebas Obligatorias de Corrección de Persistencia y Sincron
     assert.equal(controller.getMutationVersion(), 1);
     assert.equal(controller.getLastPersistedVersion(), 1);
 
-    // 2. Simular datos recuperables en almacenamiento invitado previo (fuente local recuperable)
-    const guestMonthData: MonthData = {
+    // 2. Simular datos recuperables propios del mismo usuario (fuente local aislada del usuario)
+    const recoverableUserMonthData: MonthData = {
       ...createFreshMonthData(),
       income: 310000,
       variableExpenses: [
@@ -908,12 +908,11 @@ describe('NITA — Pruebas Obligatorias de Corrección de Persistencia y Sincron
       ],
     };
     localStorage.setItem(
-      GUEST_STORAGE_KEY,
+      `nita_user_conflicts_${userId}`,
       JSON.stringify({
-        month: 10,
-        year: 2026,
-        currency: 'ARS',
-        monthsData: { [monthKey]: guestMonthData },
+        [monthKey]: {
+          local: recoverableUserMonthData,
+        },
       })
     );
 
