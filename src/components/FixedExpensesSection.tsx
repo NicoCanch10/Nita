@@ -228,13 +228,13 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs overflow-hidden relative transition-colors">
       
       {/* Section Header */}
-      <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between md:justify-start items-start gap-2.5 sm:gap-3 flex-1 min-w-0 w-full md:w-auto">
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 w-full">
-            <div className="p-2 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 rounded-xl shrink-0">
+      <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-center md:justify-between text-center md:text-left gap-3 sm:gap-4">
+        <div className="relative flex flex-col sm:flex-row items-center justify-center md:justify-start gap-2.5 sm:gap-3 min-w-0 w-full md:w-auto md:flex-1 px-11 sm:px-12 md:px-0">
+          <div className="flex items-center justify-center md:justify-start gap-2 sm:gap-2.5 min-w-0 md:flex-1">
+            <div className="absolute left-0 top-0 sm:top-1/2 sm:-translate-y-1/2 md:static md:translate-y-0 p-2 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 rounded-xl shrink-0">
               <Receipt className="w-5 h-5" />
             </div>
-            <h2 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white leading-tight sm:leading-snug flex-1 min-w-0">
+            <h2 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white leading-tight sm:leading-snug min-w-0 text-center md:text-left md:flex-1">
               <span className="block sm:inline">{t.fixedExpensesTitleLine1}</span>
               <span className="hidden sm:inline"> </span>
               <span className="block sm:inline">{t.fixedExpensesTitleLine2}</span>
@@ -245,7 +245,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
           <button
             type="button"
             onClick={() => setIsCategoryModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-colors cursor-pointer shadow-2xs text-xs shrink-0 self-start sm:self-center"
+            className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-colors cursor-pointer shadow-2xs text-xs shrink-0 self-center"
             title={t.categoriesAndColorsBtn}
           >
             <Palette className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400 shrink-0" />
@@ -254,8 +254,8 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
         </div>
 
         {/* Summary stats */}
-        <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 text-xs font-medium w-full md:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
-          <div className="text-left sm:text-right">
+        <div className="flex items-center justify-center md:justify-end gap-4 text-xs font-medium w-full md:w-auto pt-2 sm:pt-2.5 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800 shrink-0">
+          <div className="text-center md:text-right">
             <span className="text-slate-400 dark:text-slate-500 block text-2xs uppercase tracking-wider font-semibold">{t.fixedTotalMonthly}</span>
             <span className="text-slate-900 dark:text-white font-black text-sm sm:text-base tabular-nums">
               {formatCurrency(totalFixed, currency)}
@@ -264,7 +264,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
 
           <div className="h-8 w-px bg-slate-200 dark:bg-slate-700" />
 
-          <div>
+          <div className="text-center md:text-left">
             <span className="text-slate-400 dark:text-slate-500 block text-2xs uppercase tracking-wider font-semibold">{t.paidStatus}</span>
             <span className="text-emerald-700 dark:text-emerald-400 font-black text-xs sm:text-sm">
               {paidCount} / {expenses.length}
