@@ -111,17 +111,19 @@ service cloud.firestore {
     // 4. Validadores estructurales de listas y documentos financieros
     function isValidCategoryMap(cat) {
       let k = cat.keys();
-      let isCustom = cat.get('isCustom', null);
-      let badgeBg = cat.get('badgeBg', null);
-      let badgeText = cat.get('badgeText', null);
       return k.hasAll(['id', 'label', 'color'])
-        && k.hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
+        && (
+          k.size() == 3
+          || (
+            k.hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
+            && (!('isCustom' in cat) || cat.isCustom == null || cat.isCustom is bool)
+            && (!('badgeBg' in cat) || cat.badgeBg == null || (cat.badgeBg is string && cat.badgeBg.size() <= 64))
+            && (!('badgeText' in cat) || cat.badgeText == null || (cat.badgeText is string && cat.badgeText.size() <= 64))
+          )
+        )
         && cat.id is string && cat.id.size() > 0 && cat.id.size() <= 64
         && cat.label is string && cat.label.size() <= 100
-        && cat.color is string && cat.color.size() <= 32
-        && (isCustom == null || isCustom is bool)
-        && (badgeBg == null || (badgeBg is string && badgeBg.size() <= 64))
-        && (badgeText == null || (badgeText is string && badgeText.size() <= 64));
+        && cat.color is string && cat.color.size() <= 32;
     }
 
     function isValidCategoryItem(cat) {
@@ -130,17 +132,20 @@ service cloud.firestore {
 
     function isValidFixedExpenseMap(exp) {
       let k = exp.keys();
-      let dueDate = exp.get('dueDate', null);
-      let notes = exp.get('notes', null);
       return k.hasAll(['id', 'name', 'amount', 'category', 'isPaid'])
-        && k.hasOnly(['id', 'name', 'amount', 'category', 'isPaid', 'dueDate', 'notes'])
+        && (
+          k.size() == 5
+          || (
+            k.hasOnly(['id', 'name', 'amount', 'category', 'isPaid', 'dueDate', 'notes'])
+            && (!('dueDate' in exp) || exp.dueDate == null || (exp.dueDate is number && exp.dueDate >= 0 && exp.dueDate <= 31))
+            && (!('notes' in exp) || exp.notes == null || (exp.notes is string && exp.notes.size() <= 500))
+          )
+        )
         && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
         && exp.name is string && exp.name.size() <= 150
         && exp.amount is number && exp.amount >= 0
         && exp.category is string && exp.category.size() <= 64
-        && exp.isPaid is bool
-        && (dueDate == null || (dueDate is number && dueDate >= 0 && dueDate <= 31))
-        && (notes == null || (notes is string && notes.size() <= 500));
+        && exp.isPaid is bool;
     }
 
     function isValidFixedExpense(exp) {
@@ -149,11 +154,15 @@ service cloud.firestore {
 
     function isValidVariableExpenseMap(exp) {
       let k = exp.keys();
-      let desc = exp.get('description', null);
       return k.hasAll(['id', 'date', 'amount', 'category'])
-        && k.hasOnly(['id', 'date', 'description', 'amount', 'category'])
+        && (
+          k.size() == 4
+          || (
+            k.hasOnly(['id', 'date', 'description', 'amount', 'category'])
+            && (exp.description == null || (exp.description is string && exp.description.size() <= 200))
+          )
+        )
         && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
-        && (desc == null || (desc is string && desc.size() <= 200))
         && exp.amount is number && exp.amount >= 0
         && exp.category is string && exp.category.size() <= 64
         && exp.date is string
@@ -164,67 +173,79 @@ service cloud.firestore {
       return exp is map && isValidVariableExpenseMap(exp);
     }
 
-    function areValidCategories(cats) {
-      return cats is list
-        && cats.size() <= 100
+    function areValidCategoryElements(cats) {
+      let n = cats.size();
+      return n <= 100
         && (
-          cats.size() == 0
+          n == 0
           || (
             isValidCategoryItem(cats[0])
-            && (cats.size() <= 1 || (isValidCategoryItem(cats[1])
-            && (cats.size() <= 2 || (isValidCategoryItem(cats[2])
-            && (cats.size() <= 3 || (isValidCategoryItem(cats[3])
-            && (cats.size() <= 4 || (isValidCategoryItem(cats[4])
-            && (cats.size() <= 5 || (isValidCategoryItem(cats[5])
-            && (cats.size() <= 6 || (isValidCategoryItem(cats[6])
-            && (cats.size() <= 7 || (isValidCategoryItem(cats[7])
-            && (cats.size() <= 8 || (isValidCategoryItem(cats[8])
-            && (cats.size() <= 9 || (isValidCategoryItem(cats[9])
-            && (cats.size() <= 10 || isValidCategoryItem(cats[cats.size() - 1]))
+            && (n <= 1 || (isValidCategoryItem(cats[1])
+            && (n <= 2 || (isValidCategoryItem(cats[2])
+            && (n <= 3 || (isValidCategoryItem(cats[3])
+            && (n <= 4 || (isValidCategoryItem(cats[4])
+            && (n <= 5 || (isValidCategoryItem(cats[5])
+            && (n <= 6 || (isValidCategoryItem(cats[6])
+            && (n <= 7 || (isValidCategoryItem(cats[7])
+            && (n <= 8 || (isValidCategoryItem(cats[8])
+            && (n <= 9 || (isValidCategoryItem(cats[9])
+            && (n <= 10 || isValidCategoryItem(cats[n - 1]))
+            )))))))))))))))))))
+        );
+    }
+
+    function areValidCategories(cats) {
+      return cats is list && areValidCategoryElements(cats);
+    }
+
+    function areValidFixedExpenseElements(list) {
+      let n = list.size();
+      return n <= 300
+        && (
+          n == 0
+          || (
+            isValidFixedExpense(list[0])
+            && (n <= 1 || (isValidFixedExpense(list[1])
+            && (n <= 2 || (isValidFixedExpense(list[2])
+            && (n <= 3 || (isValidFixedExpense(list[3])
+            && (n <= 4 || (isValidFixedExpense(list[4])
+            && (n <= 5 || (isValidFixedExpense(list[5])
+            && (n <= 6 || (isValidFixedExpense(list[6])
+            && (n <= 7 || (isValidFixedExpense(list[7])
+            && (n <= 8 || (isValidFixedExpense(list[8])
+            && (n <= 9 || (isValidFixedExpense(list[9])
+            && (n <= 10 || isValidFixedExpense(list[n - 1]))
             )))))))))))))))))))
         );
     }
 
     function areValidFixedExpenses(list) {
-      return list is list
-        && list.size() <= 300
+      return list is list && areValidFixedExpenseElements(list);
+    }
+
+    function areValidVariableExpenseElements(list) {
+      let n = list.size();
+      return n <= 1500
         && (
-          list.size() == 0
+          n == 0
           || (
-            isValidFixedExpense(list[0])
-            && (list.size() <= 1 || (isValidFixedExpense(list[1])
-            && (list.size() <= 2 || (isValidFixedExpense(list[2])
-            && (list.size() <= 3 || (isValidFixedExpense(list[3])
-            && (list.size() <= 4 || (isValidFixedExpense(list[4])
-            && (list.size() <= 5 || (isValidFixedExpense(list[5])
-            && (list.size() <= 6 || (isValidFixedExpense(list[6])
-            && (list.size() <= 7 || (isValidFixedExpense(list[7])
-            && (list.size() <= 8 || (isValidFixedExpense(list[8])
-            && (list.size() <= 9 || (isValidFixedExpense(list[9])
-            && (list.size() <= 10 || isValidFixedExpense(list[list.size() - 1]))
+            isValidVariableExpense(list[0])
+            && (n <= 1 || (isValidVariableExpense(list[1])
+            && (n <= 2 || (isValidVariableExpense(list[2])
+            && (n <= 3 || (isValidVariableExpense(list[3])
+            && (n <= 4 || (isValidVariableExpense(list[4])
+            && (n <= 5 || (isValidVariableExpense(list[5])
+            && (n <= 6 || (isValidVariableExpense(list[6])
+            && (n <= 7 || (isValidVariableExpense(list[7])
+            && (n <= 8 || (isValidVariableExpense(list[8])
+            && (n <= 9 || (isValidVariableExpense(list[9])
+            && (n <= 10 || isValidVariableExpense(list[n - 1]))
             )))))))))))))))))))
         );
     }
 
     function areValidVariableExpenses(list) {
-      return list is list
-        && list.size() <= 1500
-        && (
-          list.size() == 0
-          || (
-            isValidVariableExpense(list[0])
-            && (list.size() <= 1 || (isValidVariableExpense(list[1])
-            && (list.size() <= 2 || (isValidVariableExpense(list[2])
-            && (list.size() <= 3 || (isValidVariableExpense(list[3])
-            && (list.size() <= 4 || (isValidVariableExpense(list[4])
-            && (list.size() <= 5 || (isValidVariableExpense(list[5])
-            && (list.size() <= 6 || (isValidVariableExpense(list[6])
-            && (list.size() <= 7 || (isValidVariableExpense(list[7])
-            && (list.size() <= 8 || (isValidVariableExpense(list[8])
-            && (list.size() <= 9 || (isValidVariableExpense(list[9])
-            && (list.size() <= 10 || isValidVariableExpense(list[list.size() - 1]))
-            )))))))))))))))))))
-        );
+      return list is list && areValidVariableExpenseElements(list);
     }
 
     function isValidJarLogMap(log) {
@@ -299,25 +320,44 @@ service cloud.firestore {
         && isValidCategoriesDoc(userId, inc);
     }
 
-    function isValidMonthDoc(userId, monthKey, data) {
-      let k = data.keys();
+    function isValidMonthTimestamp(ts) {
+      return ts is string && ts.size() >= 10 && ts.size() <= 50;
+    }
+
+    function isValidMonthOptionalFields(data) {
       let jarAdj = data.get('jarAdjustments', null);
-      let updatedAt = data.get('updatedAt', '2026-01-01T00:00:00Z');
-      let createdAt = data.get('createdAt', '2026-01-01T00:00:00Z');
       let curr = data.get('currency', null);
       let docId = data.get('id', null);
       let syncStatus = data.get('syncStatus', null);
       let isSynced = data.get('isSynced', null);
+      return (jarAdj == null || (jarAdj is map && jarAdj.size() <= 100))
+        && isValidJarLog(data.get('lastJarAdjustmentLog', null))
+        && (!('updatedAt' in data) || isValidMonthTimestamp(data.updatedAt))
+        && (!('createdAt' in data) || isValidMonthTimestamp(data.createdAt))
+        && (curr == null || isValidCurrency(curr))
+        && (docId == null || (docId is string && docId.size() > 0 && docId.size() <= 64))
+        && (syncStatus == null || (syncStatus is string && syncStatus.size() <= 32))
+        && (isSynced == null || isSynced is bool);
+    }
+
+    function isValidMonthDoc(userId, monthKey, data) {
+      let k = data.keys();
       return k.hasAll([
           'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
           'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses'
         ])
-        && k.hasOnly([
-          'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
-          'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses',
-          'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt', 'createdAt',
-          'currency', 'id', 'syncStatus', 'isSynced'
-        ])
+        && (
+          k.size() == 10
+          || (
+            k.hasOnly([
+              'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
+              'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses',
+              'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt', 'createdAt',
+              'currency', 'id', 'syncStatus', 'isSynced'
+            ])
+            && isValidMonthOptionalFields(data)
+          )
+        )
         && data.userId == userId
         && data.monthKey == monthKey
         && isCoherentMonthYear(monthKey, data.year, data.month)
@@ -326,15 +366,7 @@ service cloud.firestore {
         && data.extraDaysPosition in ['start', 'end']
         && areValidCategories(data.categories)
         && areValidFixedExpenses(data.fixedExpenses)
-        && areValidVariableExpenses(data.variableExpenses)
-        && (jarAdj == null || (jarAdj is map && jarAdj.size() <= 100))
-        && isValidJarLog(data.get('lastJarAdjustmentLog', null))
-        && updatedAt is string && updatedAt.size() >= 10 && updatedAt.size() <= 50
-        && createdAt is string && createdAt.size() >= 10 && createdAt.size() <= 50
-        && (curr == null || isValidCurrency(curr))
-        && (docId == null || (docId is string && docId.size() > 0 && docId.size() <= 64))
-        && (syncStatus == null || (syncStatus is string && syncStatus.size() <= 32))
-        && (isSynced == null || isSynced is bool);
+        && areValidVariableExpenses(data.variableExpenses);
     }
 
     function isValidMonthUpdate(userId, monthKey, inc, cur) {

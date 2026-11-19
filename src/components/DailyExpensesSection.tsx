@@ -294,12 +294,12 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
       </div>
 
       {/* Unified Load Action Bar */}
-      <div className="px-4 sm:px-6 py-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+      <div className="px-4 sm:px-6 py-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between sm:justify-center gap-3">
         <button
           type="button"
           onClick={handleOpenAddModal}
           data-testid="daily-expenses-add-trigger"
-          className="w-full sm:w-auto min-h-[42px] inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
+          className="w-full sm:w-auto sm:min-w-[200px] md:min-w-[220px] min-h-[42px] inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 sm:px-8 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
         >
           <span>CARGAR +</span>
         </button>
