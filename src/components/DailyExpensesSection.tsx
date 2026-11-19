@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { VariableExpense, CurrencyCode, CategoryInfo } from '../types/budget';
-import { getCategoryInfo, formatCurrency } from '../utils/currency';
+import {
+  CURRENCIES,
+  getCategoryInfo,
+  formatCurrency,
+  parseAmountInput,
+  formatAmountForInput,
+  formatAmountInputValue,
+  computeFormattedCaretIndex,
+} from '../utils/currency';
 import { 
   formatDateByLanguage, 
   getTranslations 
 } from '../utils/languages';
 import { CategoryManagerModal } from './CategoryManagerModal';
-import { parseAmountInput } from './FixedExpensesSection';
 import { 
   Plus, 
   Trash2, 
@@ -35,6 +42,7 @@ interface DailyExpensesSectionProps {
   onUpdateCategoryColor: (id: string, color: string) => void;
   onUpdateCategoryLabel?: (id: string, label: string) => void;
   onDeleteCategory: (id: string) => void;
+  initialAddModalOpen?: boolean;
 }
 
 export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
@@ -53,6 +61,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   onUpdateCategoryColor,
   onUpdateCategoryLabel,
   onDeleteCategory,
+  initialAddModalOpen = false,
 }) => {
   const t = getTranslations(language);
   // Helper to get default date:
@@ -80,6 +89,14 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(initialAddModalOpen);
+
+  // Sync category state when categories change or if current category is invalid
+  useEffect(() => {
+    if (categories.length > 0 && (!category || !categories.some(c => c.id === category))) {
+      setCategory(categories[3]?.id || categories[0].id);
+    }
+  }, [categories, category]);
 
   // Editing state for existing variable expenses
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -94,20 +111,63 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   }, [year, month, daysInMonth]);
 
   useEffect(() => {
-    if (!editingExpenseId) return;
+    if (!editingExpenseId && !isAddModalOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setEditingExpenseId(null);
+        if (editingExpenseId) {
+          setEditingExpenseId(null);
+        } else if (isAddModalOpen) {
+          setIsAddModalOpen(false);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingExpenseId]);
+  }, [editingExpenseId, isAddModalOpen]);
+
+  const handleOpenAddModal = () => {
+    setDescription('');
+    setAmount('');
+    setDate(getDefaultExpenseDate(year, month, daysInMonth));
+    if (categories.length > 0 && (!category || !categories.some(c => c.id === category))) {
+      setCategory(categories[3]?.id || categories[0].id);
+    }
+    setIsAddModalOpen(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false);
+    setDescription('');
+    setAmount('');
+    setDate(getDefaultExpenseDate(year, month, daysInMonth));
+  };
+
+  const currencySymbol = CURRENCIES[currency]?.symbol || '$';
+
+  const handleFormattedAmountChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    previousValue: string,
+    setter: (next: string) => void
+  ) => {
+    const inputEl = e.target;
+    const raw = inputEl.value;
+    const caret = inputEl.selectionStart;
+    const nextFormatted = formatAmountInputValue(raw, previousValue);
+    const nextCaret = computeFormattedCaretIndex(raw, caret, nextFormatted);
+    setter(nextFormatted);
+    if (nextCaret !== null && typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(() => {
+        if (document.activeElement === inputEl) {
+          inputEl.setSelectionRange(nextCaret, nextCaret);
+        }
+      });
+    }
+  };
 
   const startEditExpense = (expense: VariableExpense) => {
     setEditingExpenseId(expense.id);
     setEditDescription(expense.description || '');
-    setEditAmount(expense.amount ? String(expense.amount) : '');
+    setEditAmount(expense.amount ? formatAmountForInput(expense.amount) : '');
     setEditCategory(expense.category || categories[0]?.id || 'food');
     setEditDate(expense.date || getDefaultExpenseDate(year, month, daysInMonth));
   };
@@ -143,7 +203,9 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description.trim() || !amount || Number(amount) <= 0) {
+    const finalDesc = description.trim();
+    const numAmount = parseAmountInput(amount);
+    if (!finalDesc || !numAmount || numAmount <= 0) {
       return;
     }
 
@@ -151,16 +213,19 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
       ? date
       : getDefaultExpenseDate(year, month, daysInMonth);
 
+    const finalCategory = category || categories[0]?.id || 'food';
+
     onAddExpense({
-      description: description.trim(),
-      amount: Number(amount),
-      category,
+      description: finalDesc,
+      amount: numAmount,
+      category: finalCategory,
       date: effectiveDate,
     });
 
     setDescription('');
     setAmount('');
     setDate(getDefaultExpenseDate(year, month, daysInMonth));
+    setIsAddModalOpen(false);
   };
 
   // Sort categories alphabetically for dropdown selector
@@ -228,88 +293,17 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
         </div>
       </div>
 
-      {/* Add Expense Form */}
-      <form onSubmit={handleAddSubmit} className="p-3.5 sm:p-5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 sm:gap-3.5 items-center">
-          
-          {/* Date */}
-          <div className="sm:col-span-1 lg:col-span-2 xl:col-span-2">
-            <input
-              type="date"
-              value={date}
-              min={`${year}-${String(month + 1).padStart(2, '0')}-01`}
-              max={`${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-3 sm:px-3.5 py-2.5 text-xs sm:text-sm focus:outline-hidden focus:border-emerald-500 cursor-pointer"
-              required
-            />
-          </div>
-
-          {/* Description */}
-          <div className="sm:col-span-1 lg:col-span-3 xl:col-span-4">
-            <input
-              type="text"
-              placeholder={t.descPlaceholder}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-3.5 py-2.5 text-sm placeholder:text-slate-400 focus:outline-hidden focus:border-emerald-500"
-              required
-            />
-          </div>
-
-          {/* Amount input & Category Selector in the same row on mobile */}
-          <div className="sm:col-span-2 lg:col-span-5 xl:col-span-4 grid grid-cols-12 gap-2 sm:gap-3.5 items-center">
-            {/* Amount input (reduced on mobile: 5 cols out of 12) */}
-            <div className="col-span-5 sm:col-span-6 relative">
-              <input
-                type="number"
-                min="0.01"
-                step="any"
-                placeholder={t.amountPlaceholder}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-3 sm:px-3.5 py-2.5 text-xs sm:text-sm placeholder:text-slate-400 focus:outline-hidden focus:border-emerald-500 tabular-nums"
-                required
-              />
-            </div>
-
-            {/* Category Selector with Color indicator (7 cols out of 12 on mobile) */}
-            <div className="col-span-7 sm:col-span-6 flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <div 
-                className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full shrink-0 shadow-2xs border border-white dark:border-slate-700"
-                style={{ backgroundColor: currentCategoryInfo.color }}
-                title={`Color: ${currentCategoryInfo.label}`}
-              />
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-xl px-2 sm:px-3 py-2.5 text-xs sm:text-sm focus:outline-hidden focus:border-emerald-500 cursor-pointer truncate"
-              >
-                {sortedCategories.map((cat) => {
-                  const catInfo = getCategoryInfo(cat.id, categories, language);
-                  return (
-                    <option key={cat.id} value={cat.id} className="dark:bg-slate-800 dark:text-white">
-                      {catInfo.label} {cat.isCustom ? `(${t.customCategoryTag})` : ''}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          </div>
-
-          {/* Add Button */}
-          <div className="sm:col-span-2 lg:col-span-2 xl:col-span-2">
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold py-2.5 px-3 rounded-xl transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4 shrink-0" />
-              <span>{t.addButton}</span>
-            </button>
-          </div>
-
-        </div>
-      </form>
+      {/* Unified Load Action Bar */}
+      <div className="px-4 sm:px-6 py-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={handleOpenAddModal}
+          data-testid="daily-expenses-add-trigger"
+          className="w-full sm:w-auto min-h-[42px] inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
+        >
+          <span>CARGAR +</span>
+        </button>
+      </div>
 
       {/* Filter and Search Bar */}
       <div className="px-4 sm:px-6 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
@@ -425,6 +419,140 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
         )}
       </div>
 
+      {/* Centered Add Variable Expense Modal */}
+      {isAddModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={handleCloseAddModal}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cargar Gasto Variable"
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleAddSubmit}
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-3xl border border-emerald-200 dark:border-emerald-800 shadow-2xl space-y-4 transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <span className="text-sm sm:text-base font-black text-emerald-900 dark:text-emerald-300 flex items-center gap-2">
+                <span className="p-1.5 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
+                  <Plus className="w-4 h-4" />
+                </span>
+                Cargar Gasto Variable
+              </span>
+              <button
+                type="button"
+                onClick={handleCloseAddModal}
+                title="Cerrar"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+              {/* Descripción */}
+              <div className="sm:col-span-12">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Descripción
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={t.descPlaceholder}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:border-emerald-500"
+                  autoFocus
+                  required
+                />
+              </div>
+
+              {/* Monto */}
+              <div className="sm:col-span-4">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Importe ({currency})
+                </label>
+                <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-emerald-500 transition-colors">
+                  <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
+                    {currencySymbol}
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={amount}
+                    onChange={(e) => handleFormattedAmountChange(e, amount, setAmount)}
+                    placeholder="0,00"
+                    className="w-full min-w-0 bg-transparent pr-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Categoría */}
+              <div className="sm:col-span-4">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Categoría
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-white dark:border-slate-700"
+                    style={{ backgroundColor: currentCategoryInfo.color }}
+                    title={`Color: ${currentCategoryInfo.label}`}
+                  />
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer truncate"
+                  >
+                    {sortedCategories.map((cat) => {
+                      const catInfo = getCategoryInfo(cat.id, categories, language);
+                      return (
+                        <option key={cat.id} value={cat.id} className="dark:bg-slate-800 dark:text-white">
+                          {catInfo.label} {cat.isCustom ? `(${t.customCategoryTag})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {/* Fecha */}
+              <div className="sm:col-span-4">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Fecha
+                </label>
+                <input
+                  type="date"
+                  value={date}
+                  min={`${year}-${String(month + 1).padStart(2, '0')}-01`}
+                  max={`${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={handleCloseAddModal}
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Cargar Gasto</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Centered Edit Variable Expense Modal */}
       {(() => {
         const editingExpense = editingExpenseId
@@ -501,15 +629,20 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                     Importe ({currency})
                   </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={editAmount}
-                    onChange={(e) => setEditAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                    required
-                  />
+                  <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-emerald-500 transition-colors">
+                    <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
+                      {currencySymbol}
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={editAmount}
+                      onChange={(e) => handleFormattedAmountChange(e, editAmount, setEditAmount)}
+                      placeholder="0,00"
+                      className="w-full min-w-0 bg-transparent pr-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
+                      required
+                    />
+                  </div>
                 </div>
 
                 {/* Categoría */}

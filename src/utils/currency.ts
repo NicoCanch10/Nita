@@ -217,3 +217,106 @@ export function formatCompactCurrency(amount: number, currencyCode: CurrencyCode
     return `${config.symbol} ${amount}`;
   }
 }
+
+function groupThousandsDots(intDigits: string): string {
+  const clean = intDigits.replace(/^0+(?=\d)/, '');
+  if (!clean) return '0';
+  return clean.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+export function parseAmountInput(val: string | number): number {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  let clean = String(val).replace(/[^0-9.,-]/g, '').trim();
+  if (!clean) return 0;
+
+  if (clean.includes('.') && clean.includes(',')) {
+    if (clean.lastIndexOf('.') < clean.lastIndexOf(',')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else {
+      clean = clean.replace(/,/g, '');
+    }
+  } else if (clean.includes(',')) {
+    const parts = clean.split(',');
+    if (parts.length > 2) {
+      clean = clean.replace(/,/g, '');
+    } else {
+      clean = clean.replace(',', '.');
+    }
+  } else if (clean.includes('.')) {
+    const parts = clean.split('.');
+    if (parts.length > 2) {
+      clean = clean.replace(/\./g, '');
+    } else if (parts[1].length === 3 && parts[0].length >= 1) {
+      clean = clean.replace('.', '');
+    }
+  }
+  const parsed = parseFloat(clean);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+export function formatAmountForInput(amount: number, allowZero = false): string {
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) return '';
+  if (amount === 0) return allowZero ? '0' : '';
+
+  const rounded = Math.round(amount * 100) / 100;
+  const isInteger = Math.abs(rounded - Math.round(rounded)) < 1e-9;
+  if (isInteger) {
+    return groupThousandsDots(String(Math.round(rounded)));
+  }
+  const [intPart, decPart] = rounded.toFixed(2).split('.');
+  return `${groupThousandsDots(intPart)},${decPart}`;
+}
+
+export function formatAmountInputValue(rawValue: string, previousFormatted = ''): string {
+  if (!rawValue) return '';
+
+  // Keep only digits, dots and commas
+  const sanitized = rawValue.replace(/[^0-9.,]/g, '');
+  if (!sanitized) return '';
+
+  // Detect pasted US-decimal format like "10325.24" or "50.5" (single dot, 1-2 decimal digits, no comma)
+  const isLikelyPaste = Math.abs(rawValue.length - previousFormatted.length) > 1 || previousFormatted === '';
+  let normalized = sanitized;
+  if (isLikelyPaste && !sanitized.includes(',') && sanitized.includes('.')) {
+    const dotParts = sanitized.split('.');
+    if (dotParts.length === 2 && dotParts[1].length > 0 && dotParts[1].length <= 2) {
+      normalized = `${dotParts[0]},${dotParts[1]}`;
+    }
+  }
+
+  const commaIndex = normalized.indexOf(',');
+  if (commaIndex !== -1) {
+    const rawInt = normalized.slice(0, commaIndex).replace(/\D/g, '');
+    const rawDec = normalized.slice(commaIndex + 1).replace(/\D/g, '').slice(0, 2);
+    const formattedInt = rawInt ? groupThousandsDots(rawInt) : '0';
+    return `${formattedInt},${rawDec}`;
+  }
+
+  const digitsOnly = normalized.replace(/\D/g, '');
+  if (!digitsOnly) return '';
+  return groupThousandsDots(digitsOnly);
+}
+
+export function computeFormattedCaretIndex(
+  rawValue: string,
+  rawCaret: number | null,
+  formattedValue: string
+): number | null {
+  if (rawCaret === null) return null;
+  const beforeCaret = rawValue.slice(0, rawCaret);
+  const significantCount = (beforeCaret.match(/[0-9,]/g) || []).length;
+  if (significantCount === 0) return 0;
+
+  let seen = 0;
+  for (let i = 0; i < formattedValue.length; i++) {
+    if (/[0-9,]/.test(formattedValue[i])) {
+      seen++;
+      if (seen === significantCount) {
+        return i + 1;
+      }
+    }
+  }
+  return formattedValue.length;
+}
+

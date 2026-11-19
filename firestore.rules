@@ -31,10 +31,6 @@ service cloud.firestore {
     }
 
     // 3. Funciones auxiliares de identidad, sesión y época de seguridad
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isValidId(id) {
       return id is string
         && id.size() > 0
@@ -48,53 +44,49 @@ service cloud.firestore {
         && key.matches('^[0-9]{4}-(0[1-9]|1[0-2])$');
     }
 
-    function isNotAnonymous() {
-      return !('firebase' in request.auth.token
-        && 'sign_in_provider' in request.auth.token.firebase
-        && request.auth.token.firebase.sign_in_provider == 'anonymous');
+    function hasValidUserSecurityDoc(userId, tokenEpoch, sec) {
+      return sec.get('uid', '') == userId
+        && ('minSessionEpoch' in sec)
+        && sec.minSessionEpoch is int
+        && sec.minSessionEpoch >= 1
+        && tokenEpoch >= sec.minSessionEpoch;
     }
 
-    function isCustomPasswordSession() {
-      return isSignedIn()
-        && ('provider' in request.auth.token)
-        && request.auth.token.provider == 'nita_password';
-    }
-
-    function hasValidNitaSecurityEpoch(userId) {
-      return isCustomPasswordSession()
-        && userId.size() >= 5
-        && userId.matches('^usr_.+$')
-        && ('sessionEpoch' in request.auth.token)
-        && request.auth.token.sessionEpoch is int
-        && request.auth.token.sessionEpoch >= 1
+    function hasValidNitaSecurityEpoch(userId, tok) {
+      return userId.size() >= 5
+        && ('sessionEpoch' in tok)
+        && tok.sessionEpoch is int
+        && tok.sessionEpoch >= 1
         && exists(/databases/$(database)/documents/userSecurity/$(userId))
-        && get(/databases/$(database)/documents/userSecurity/$(userId)).data.uid == userId
-        && get(/databases/$(database)/documents/userSecurity/$(userId)).data.minSessionEpoch is int
-        && get(/databases/$(database)/documents/userSecurity/$(userId)).data.minSessionEpoch >= 1
-        && request.auth.token.sessionEpoch >= get(/databases/$(database)/documents/userSecurity/$(userId)).data.minSessionEpoch;
-    }
-
-    function isAuthorizedOwner(userId) {
-      return isSignedIn()
-        && isValidId(userId)
-        && request.auth.uid == userId
-        && isNotAnonymous()
-        && (
-          ((userId.matches('^usr_.*') || isCustomPasswordSession()) && hasValidNitaSecurityEpoch(userId))
-          || (!userId.matches('^usr_.*') && !isCustomPasswordSession())
+        && hasValidUserSecurityDoc(
+          userId,
+          tok.sessionEpoch,
+          get(/databases/$(database)/documents/userSecurity/$(userId)).data
         );
     }
 
-    function existing() {
-      return resource.data;
+    function matchesOwnerProviderRules(userId, tok, isUsr, isCustomPwd) {
+      return (isUsr && isCustomPwd && hasValidNitaSecurityEpoch(userId, tok))
+        || (!isUsr && !isCustomPwd);
     }
 
-    function incoming() {
-      return request.resource.data;
+    function isValidOwnerToken(userId, tok) {
+      return !('firebase' in tok
+          && 'sign_in_provider' in tok.firebase
+          && tok.firebase.sign_in_provider == 'anonymous')
+        && matchesOwnerProviderRules(
+          userId,
+          tok,
+          userId.matches('^usr_.*'),
+          tok.get('provider', '') == 'nita_password'
+        );
     }
 
-    function isValidTimestamp(val) {
-      return val is string && val.size() >= 10 && val.size() <= 50;
+    function isAuthorizedOwner(userId) {
+      return request.auth != null
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidOwnerToken(userId, request.auth.token);
     }
 
     function isValidCurrency(curr) {
@@ -105,163 +97,222 @@ service cloud.firestore {
       ];
     }
 
-    function isCoherentYear(key, y) {
+    function isCoherentMonthYear(key, y, m) {
       return y is int
         && y >= 1970
         && y <= 2200
-        && isValidMonthKey(key)
-        && string(y) == key[0:4];
-    }
-
-    function isCoherentMonth(key, m) {
-      return m is int
+        && string(y) == key[0:4]
+        && m is int
         && m >= 0
         && m <= 11
-        && isValidMonthKey(key)
-        && (
-          (m == 0 && key[5:7] == '01') ||
-          (m == 1 && key[5:7] == '02') ||
-          (m == 2 && key[5:7] == '03') ||
-          (m == 3 && key[5:7] == '04') ||
-          (m == 4 && key[5:7] == '05') ||
-          (m == 5 && key[5:7] == '06') ||
-          (m == 6 && key[5:7] == '07') ||
-          (m == 7 && key[5:7] == '08') ||
-          (m == 8 && key[5:7] == '09') ||
-          (m == 9 && key[5:7] == '10') ||
-          (m == 10 && key[5:7] == '11') ||
-          (m == 11 && key[5:7] == '12')
-        );
+        && ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'][m] == key[5:7];
     }
 
     // 4. Validadores estructurales de listas y documentos financieros
-    function isValidCategoryItem(cat) {
-      return cat is map
-        && cat.keys().hasAll(['id', 'label', 'color'])
-        && cat.keys().hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
+    function isValidCategoryMap(cat) {
+      let k = cat.keys();
+      let isCustom = cat.get('isCustom', null);
+      let badgeBg = cat.get('badgeBg', null);
+      let badgeText = cat.get('badgeText', null);
+      return k.hasAll(['id', 'label', 'color'])
+        && k.hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
         && cat.id is string && cat.id.size() > 0 && cat.id.size() <= 64
         && cat.label is string && cat.label.size() <= 100
         && cat.color is string && cat.color.size() <= 32
-        && (!('isCustom' in cat) || cat.isCustom == null || cat.isCustom is bool)
-        && (!('badgeBg' in cat) || cat.badgeBg == null || (cat.badgeBg is string && cat.badgeBg.size() <= 64))
-        && (!('badgeText' in cat) || cat.badgeText == null || (cat.badgeText is string && cat.badgeText.size() <= 64));
+        && (isCustom == null || isCustom is bool)
+        && (badgeBg == null || (badgeBg is string && badgeBg.size() <= 64))
+        && (badgeText == null || (badgeText is string && badgeText.size() <= 64));
+    }
+
+    function isValidCategoryItem(cat) {
+      return cat is map && isValidCategoryMap(cat);
+    }
+
+    function isValidFixedExpenseMap(exp) {
+      let k = exp.keys();
+      let dueDate = exp.get('dueDate', null);
+      let notes = exp.get('notes', null);
+      return k.hasAll(['id', 'name', 'amount', 'category', 'isPaid'])
+        && k.hasOnly(['id', 'name', 'amount', 'category', 'isPaid', 'dueDate', 'notes'])
+        && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
+        && exp.name is string && exp.name.size() <= 150
+        && exp.amount is number && exp.amount >= 0
+        && exp.category is string && exp.category.size() <= 64
+        && exp.isPaid is bool
+        && (dueDate == null || (dueDate is number && dueDate >= 0 && dueDate <= 31))
+        && (notes == null || (notes is string && notes.size() <= 500));
     }
 
     function isValidFixedExpense(exp) {
-      return exp is map
-        && exp.keys().hasAll(['id', 'name', 'amount', 'category', 'isPaid'])
-        && exp.keys().hasOnly(['id', 'name', 'amount', 'category', 'isPaid', 'dueDate', 'notes'])
-        && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
-        && exp.name is string && exp.name.size() <= 150
-        && (exp.amount is int || exp.amount is float) && exp.amount >= 0
-        && exp.category is string && exp.category.size() <= 64
-        && exp.isPaid is bool
-        && (!('dueDate' in exp) || exp.dueDate == null || ((exp.dueDate is int || exp.dueDate is float) && exp.dueDate >= 0 && exp.dueDate <= 31))
-        && (!('notes' in exp) || exp.notes == null || (exp.notes is string && exp.notes.size() <= 500));
+      return exp is map && isValidFixedExpenseMap(exp);
     }
 
-    function isValidVariableExpense(exp) {
-      return exp is map
-        && exp.keys().hasAll(['id', 'date', 'amount', 'category'])
-        && exp.keys().hasOnly(['id', 'date', 'description', 'amount', 'category'])
+    function isValidVariableExpenseMap(exp) {
+      let k = exp.keys();
+      let desc = exp.get('description', null);
+      return k.hasAll(['id', 'date', 'amount', 'category'])
+        && k.hasOnly(['id', 'date', 'description', 'amount', 'category'])
         && exp.id is string && exp.id.size() > 0 && exp.id.size() <= 64
-        && (!('description' in exp) || exp.description == null || (exp.description is string && exp.description.size() <= 200))
-        && (exp.amount is int || exp.amount is float) && exp.amount >= 0
+        && (desc == null || (desc is string && desc.size() <= 200))
+        && exp.amount is number && exp.amount >= 0
         && exp.category is string && exp.category.size() <= 64
         && exp.date is string
         && exp.date.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
     }
 
+    function isValidVariableExpense(exp) {
+      return exp is map && isValidVariableExpenseMap(exp);
+    }
+
     function areValidCategories(cats) {
-      return cats is list && cats.size() <= 100
-        && (cats.size() <= 0 || isValidCategoryItem(cats[0]))
-        && (cats.size() <= 1 || isValidCategoryItem(cats[1]))
-        && (cats.size() <= 2 || isValidCategoryItem(cats[2]))
-        && (cats.size() <= 3 || isValidCategoryItem(cats[3]))
-        && (cats.size() <= 4 || isValidCategoryItem(cats[4]))
-        && (cats.size() <= 5 || isValidCategoryItem(cats[5]))
-        && (cats.size() <= 6 || isValidCategoryItem(cats[6]))
-        && (cats.size() <= 7 || isValidCategoryItem(cats[7]))
-        && (cats.size() <= 8 || isValidCategoryItem(cats[8]))
-        && (cats.size() <= 9 || isValidCategoryItem(cats[9]))
-        && (cats.size() <= 10 || isValidCategoryItem(cats[cats.size() - 1]));
+      return cats is list
+        && cats.size() <= 100
+        && (
+          cats.size() == 0
+          || (
+            isValidCategoryItem(cats[0])
+            && (cats.size() <= 1 || (isValidCategoryItem(cats[1])
+            && (cats.size() <= 2 || (isValidCategoryItem(cats[2])
+            && (cats.size() <= 3 || (isValidCategoryItem(cats[3])
+            && (cats.size() <= 4 || (isValidCategoryItem(cats[4])
+            && (cats.size() <= 5 || (isValidCategoryItem(cats[5])
+            && (cats.size() <= 6 || (isValidCategoryItem(cats[6])
+            && (cats.size() <= 7 || (isValidCategoryItem(cats[7])
+            && (cats.size() <= 8 || (isValidCategoryItem(cats[8])
+            && (cats.size() <= 9 || (isValidCategoryItem(cats[9])
+            && (cats.size() <= 10 || isValidCategoryItem(cats[cats.size() - 1]))
+            )))))))))))))))))))
+        );
     }
 
     function areValidFixedExpenses(list) {
-      return list is list && list.size() <= 300
-        && (list.size() <= 0 || isValidFixedExpense(list[0]))
-        && (list.size() <= 1 || isValidFixedExpense(list[1]))
-        && (list.size() <= 2 || isValidFixedExpense(list[2]))
-        && (list.size() <= 3 || isValidFixedExpense(list[3]))
-        && (list.size() <= 4 || isValidFixedExpense(list[4]))
-        && (list.size() <= 5 || isValidFixedExpense(list[5]))
-        && (list.size() <= 6 || isValidFixedExpense(list[6]))
-        && (list.size() <= 7 || isValidFixedExpense(list[7]))
-        && (list.size() <= 8 || isValidFixedExpense(list[8]))
-        && (list.size() <= 9 || isValidFixedExpense(list[9]))
-        && (list.size() <= 10 || isValidFixedExpense(list[list.size() - 1]));
+      return list is list
+        && list.size() <= 300
+        && (
+          list.size() == 0
+          || (
+            isValidFixedExpense(list[0])
+            && (list.size() <= 1 || (isValidFixedExpense(list[1])
+            && (list.size() <= 2 || (isValidFixedExpense(list[2])
+            && (list.size() <= 3 || (isValidFixedExpense(list[3])
+            && (list.size() <= 4 || (isValidFixedExpense(list[4])
+            && (list.size() <= 5 || (isValidFixedExpense(list[5])
+            && (list.size() <= 6 || (isValidFixedExpense(list[6])
+            && (list.size() <= 7 || (isValidFixedExpense(list[7])
+            && (list.size() <= 8 || (isValidFixedExpense(list[8])
+            && (list.size() <= 9 || (isValidFixedExpense(list[9])
+            && (list.size() <= 10 || isValidFixedExpense(list[list.size() - 1]))
+            )))))))))))))))))))
+        );
     }
 
     function areValidVariableExpenses(list) {
-      return list is list && list.size() <= 1500
-        && (list.size() <= 0 || isValidVariableExpense(list[0]))
-        && (list.size() <= 1 || isValidVariableExpense(list[1]))
-        && (list.size() <= 2 || isValidVariableExpense(list[2]))
-        && (list.size() <= 3 || isValidVariableExpense(list[3]))
-        && (list.size() <= 4 || isValidVariableExpense(list[4]))
-        && (list.size() <= 5 || isValidVariableExpense(list[5]))
-        && (list.size() <= 6 || isValidVariableExpense(list[6]))
-        && (list.size() <= 7 || isValidVariableExpense(list[7]))
-        && (list.size() <= 8 || isValidVariableExpense(list[8]))
-        && (list.size() <= 9 || isValidVariableExpense(list[9]))
-        && (list.size() <= 10 || isValidVariableExpense(list[list.size() - 1]));
+      return list is list
+        && list.size() <= 1500
+        && (
+          list.size() == 0
+          || (
+            isValidVariableExpense(list[0])
+            && (list.size() <= 1 || (isValidVariableExpense(list[1])
+            && (list.size() <= 2 || (isValidVariableExpense(list[2])
+            && (list.size() <= 3 || (isValidVariableExpense(list[3])
+            && (list.size() <= 4 || (isValidVariableExpense(list[4])
+            && (list.size() <= 5 || (isValidVariableExpense(list[5])
+            && (list.size() <= 6 || (isValidVariableExpense(list[6])
+            && (list.size() <= 7 || (isValidVariableExpense(list[7])
+            && (list.size() <= 8 || (isValidVariableExpense(list[8])
+            && (list.size() <= 9 || (isValidVariableExpense(list[9])
+            && (list.size() <= 10 || isValidVariableExpense(list[list.size() - 1]))
+            )))))))))))))))))))
+        );
+    }
+
+    function isValidJarLogMap(log) {
+      let dt = log.get('date', null);
+      let title = log.get('exceededJarTitle', null);
+      let diff = log.get('diff', null);
+      let transferred = log.get('transferredToNextMonth', null);
+      let nextKey = log.get('nextMonthKey', null);
+      return log.keys().hasOnly(['date', 'exceededJarTitle', 'diff', 'transferredToNextMonth', 'nextMonthKey'])
+        && (dt == null || (dt is string && dt.size() <= 50))
+        && (title == null || (title is string && title.size() <= 100))
+        && (diff == null || diff is number)
+        && (transferred == null || transferred is bool)
+        && (nextKey == null || (nextKey is string && nextKey.size() <= 20));
     }
 
     function isValidJarLog(log) {
-      return log == null || (
-        log is map
-        && log.keys().hasOnly(['date', 'exceededJarTitle', 'diff', 'transferredToNextMonth', 'nextMonthKey'])
-        && (!('date' in log) || log.date == null || (log.date is string && log.date.size() <= 50))
-        && (!('exceededJarTitle' in log) || log.exceededJarTitle == null || (log.exceededJarTitle is string && log.exceededJarTitle.size() <= 100))
-        && (!('diff' in log) || log.diff == null || (log.diff is int || log.diff is float))
-        && (!('transferredToNextMonth' in log) || log.transferredToNextMonth == null || log.transferredToNextMonth is bool)
-        && (!('nextMonthKey' in log) || log.nextMonthKey == null || (log.nextMonthKey is string && log.nextMonthKey.size() <= 20))
-      );
+      return log == null || (log is map && isValidJarLogMap(log));
     }
 
     function isValidUserDoc(userId, data) {
-      return data.keys().hasAll(['uid'])
-        && data.keys().hasOnly([
+      let k = data.keys();
+      let idVal = data.get('id', userId);
+      let lang = data.get('language', 'es');
+      let email = data.get('email', null);
+      let displayName = data.get('displayName', null);
+      let photoURL = data.get('photoURL', null);
+      let updatedAt = data.get('updatedAt', '2026-01-01T00:00:00Z');
+      let createdAt = data.get('createdAt', '2026-01-01T00:00:00Z');
+      return k.hasAll(['uid'])
+        && k.hasOnly([
           'uid', 'email', 'displayName', 'photoURL',
           'currency', 'language', 'onboardingSeen',
           'updatedAt', 'createdAt', 'id'
         ])
         && data.uid == userId
-        && (!('id' in data) || data.id == null || (data.id is string && data.id == userId))
-        && (!('currency' in data) || isValidCurrency(data.currency))
-        && (!('language' in data) || (data.language is string && data.language.size() > 0 && data.language.size() <= 10))
-        && (!('onboardingSeen' in data) || data.onboardingSeen is bool)
-        && (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 320))
-        && (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 250))
-        && (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 2048))
-        && (!('updatedAt' in data) || isValidTimestamp(data.updatedAt))
-        && (!('createdAt' in data) || isValidTimestamp(data.createdAt));
+        && (idVal == null || (idVal is string && idVal == userId))
+        && isValidCurrency(data.get('currency', 'USD'))
+        && lang is string && lang.size() > 0 && lang.size() <= 10
+        && data.get('onboardingSeen', false) is bool
+        && (email == null || (email is string && email.size() <= 320))
+        && (displayName == null || (displayName is string && displayName.size() <= 250))
+        && (photoURL == null || (photoURL is string && photoURL.size() <= 2048))
+        && updatedAt is string && updatedAt.size() >= 10 && updatedAt.size() <= 50
+        && createdAt is string && createdAt.size() >= 10 && createdAt.size() <= 50;
+    }
+
+    function isValidUserUpdate(userId, inc, cur) {
+      return (!('uid' in cur) || cur.uid == userId)
+        && (!('createdAt' in cur) || (('createdAt' in inc) && inc.createdAt == cur.createdAt))
+        && inc.diff(cur).affectedKeys().hasOnly([
+          'uid', 'email', 'displayName', 'photoURL',
+          'currency', 'language', 'onboardingSeen',
+          'updatedAt', 'id'
+        ])
+        && isValidUserDoc(userId, inc);
     }
 
     function isValidCategoriesDoc(userId, data) {
-      return data.keys().hasAll(['userId', 'categories'])
-        && data.keys().hasOnly(['userId', 'categories', 'updatedAt'])
+      let k = data.keys();
+      let updatedAt = data.get('updatedAt', '2026-01-01T00:00:00Z');
+      return k.hasAll(['userId', 'categories'])
+        && k.hasOnly(['userId', 'categories', 'updatedAt'])
         && data.userId == userId
         && areValidCategories(data.categories)
-        && (!('updatedAt' in data) || isValidTimestamp(data.updatedAt));
+        && updatedAt is string && updatedAt.size() >= 10 && updatedAt.size() <= 50;
+    }
+
+    function isValidCategoriesUpdate(userId, inc, cur) {
+      return (!('userId' in cur) || cur.userId == userId)
+        && inc.diff(cur).affectedKeys().hasOnly(['userId', 'categories', 'updatedAt'])
+        && isValidCategoriesDoc(userId, inc);
     }
 
     function isValidMonthDoc(userId, monthKey, data) {
-      return data.keys().hasAll([
+      let k = data.keys();
+      let jarAdj = data.get('jarAdjustments', null);
+      let updatedAt = data.get('updatedAt', '2026-01-01T00:00:00Z');
+      let createdAt = data.get('createdAt', '2026-01-01T00:00:00Z');
+      let curr = data.get('currency', null);
+      let docId = data.get('id', null);
+      let syncStatus = data.get('syncStatus', null);
+      let isSynced = data.get('isSynced', null);
+      return k.hasAll([
           'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
           'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses'
         ])
-        && data.keys().hasOnly([
+        && k.hasOnly([
           'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
           'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses',
           'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt', 'createdAt',
@@ -269,22 +320,34 @@ service cloud.firestore {
         ])
         && data.userId == userId
         && data.monthKey == monthKey
-        && isCoherentYear(monthKey, data.year)
-        && isCoherentMonth(monthKey, data.month)
-        && (data.income is int || data.income is float) && data.income >= 0
-        && (data.savingsRate is int || data.savingsRate is float) && data.savingsRate >= 0 && data.savingsRate <= 100
+        && isCoherentMonthYear(monthKey, data.year, data.month)
+        && data.income is number && data.income >= 0
+        && data.savingsRate is number && data.savingsRate >= 0 && data.savingsRate <= 100
         && data.extraDaysPosition in ['start', 'end']
         && areValidCategories(data.categories)
         && areValidFixedExpenses(data.fixedExpenses)
         && areValidVariableExpenses(data.variableExpenses)
-        && (!('jarAdjustments' in data) || data.jarAdjustments == null || (data.jarAdjustments is map && data.jarAdjustments.size() <= 100))
-        && (!('lastJarAdjustmentLog' in data) || isValidJarLog(data.lastJarAdjustmentLog))
-        && (!('updatedAt' in data) || isValidTimestamp(data.updatedAt))
-        && (!('createdAt' in data) || isValidTimestamp(data.createdAt))
-        && (!('currency' in data) || data.currency == null || isValidCurrency(data.currency))
-        && (!('id' in data) || data.id == null || (data.id is string && data.id.size() > 0 && data.id.size() <= 64))
-        && (!('syncStatus' in data) || data.syncStatus == null || (data.syncStatus is string && data.syncStatus.size() <= 32))
-        && (!('isSynced' in data) || data.isSynced == null || data.isSynced is bool);
+        && (jarAdj == null || (jarAdj is map && jarAdj.size() <= 100))
+        && isValidJarLog(data.get('lastJarAdjustmentLog', null))
+        && updatedAt is string && updatedAt.size() >= 10 && updatedAt.size() <= 50
+        && createdAt is string && createdAt.size() >= 10 && createdAt.size() <= 50
+        && (curr == null || isValidCurrency(curr))
+        && (docId == null || (docId is string && docId.size() > 0 && docId.size() <= 64))
+        && (syncStatus == null || (syncStatus is string && syncStatus.size() <= 32))
+        && (isSynced == null || isSynced is bool);
+    }
+
+    function isValidMonthUpdate(userId, monthKey, inc, cur) {
+      return (!('userId' in cur) || cur.userId == userId)
+        && (!('monthKey' in cur) || cur.monthKey == monthKey)
+        && (!('createdAt' in cur) || (('createdAt' in inc) && inc.createdAt == cur.createdAt))
+        && inc.diff(cur).affectedKeys().hasOnly([
+          'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
+          'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses',
+          'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt', 'currency', 'id',
+          'syncStatus', 'isSynced'
+        ])
+        && isValidMonthDoc(userId, monthKey, inc);
     }
 
     // 5. Documento de perfil de usuario (/users/{userId})
@@ -294,61 +357,39 @@ service cloud.firestore {
       allow delete: if false;
 
       allow create: if isAuthorizedOwner(userId)
-        && isValidUserDoc(userId, incoming());
+        && isValidUserDoc(userId, request.resource.data);
 
       allow update: if isAuthorizedOwner(userId)
-        && incoming().uid == userId
-        && (!('uid' in existing()) || incoming().uid == existing().uid)
-        && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt)
-        && incoming().diff(existing()).affectedKeys().hasOnly([
-          'uid', 'email', 'displayName', 'photoURL',
-          'currency', 'language', 'onboardingSeen',
-          'updatedAt', 'id'
-        ])
-        && isValidUserDoc(userId, incoming());
+        && isValidUserUpdate(userId, request.resource.data, resource.data);
 
       // 6. Categorías globales (/users/{userId}/categories/global)
       match /categories/{docId} {
-        allow get: if isAuthorizedOwner(userId) && docId == 'global';
+        allow get: if docId == 'global' && isAuthorizedOwner(userId);
         allow list: if isAuthorizedOwner(userId);
         allow delete: if false;
 
-        allow create: if isAuthorizedOwner(userId)
-          && docId == 'global'
-          && isValidCategoriesDoc(userId, incoming());
+        allow create: if docId == 'global'
+          && isAuthorizedOwner(userId)
+          && isValidCategoriesDoc(userId, request.resource.data);
 
-        allow update: if isAuthorizedOwner(userId)
-          && docId == 'global'
-          && incoming().userId == userId
-          && (!('userId' in existing()) || incoming().userId == existing().userId)
-          && incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'categories', 'updatedAt'])
-          && isValidCategoriesDoc(userId, incoming());
+        allow update: if docId == 'global'
+          && isAuthorizedOwner(userId)
+          && isValidCategoriesUpdate(userId, request.resource.data, resource.data);
       }
 
       // 7. Presupuestos mensuales (/users/{userId}/months/{monthKey})
       match /months/{monthKey} {
-        allow get: if isAuthorizedOwner(userId) && isValidMonthKey(monthKey);
+        allow get: if isValidMonthKey(monthKey) && isAuthorizedOwner(userId);
         allow list: if isAuthorizedOwner(userId);
         allow delete: if false;
 
-        allow create: if isAuthorizedOwner(userId)
-          && isValidMonthKey(monthKey)
-          && isValidMonthDoc(userId, monthKey, incoming());
+        allow create: if isValidMonthKey(monthKey)
+          && isAuthorizedOwner(userId)
+          && isValidMonthDoc(userId, monthKey, request.resource.data);
 
-        allow update: if isAuthorizedOwner(userId)
-          && isValidMonthKey(monthKey)
-          && incoming().userId == userId
-          && (!('userId' in existing()) || incoming().userId == existing().userId)
-          && incoming().monthKey == monthKey
-          && (!('monthKey' in existing()) || incoming().monthKey == existing().monthKey)
-          && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt)
-          && incoming().diff(existing()).affectedKeys().hasOnly([
-            'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
-            'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses',
-            'jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt', 'currency', 'id',
-            'syncStatus', 'isSynced'
-          ])
-          && isValidMonthDoc(userId, monthKey, incoming());
+        allow update: if isValidMonthKey(monthKey)
+          && isAuthorizedOwner(userId)
+          && isValidMonthUpdate(userId, monthKey, request.resource.data, resource.data);
       }
     }
   }

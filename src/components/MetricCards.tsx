@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CurrencyCode, MonthCalculationDetails, FiveJarsCalculation } from '../types/budget';
-import { formatCurrency } from '../utils/currency';
+import {
+  CURRENCIES,
+  formatCurrency,
+  parseAmountInput,
+  formatAmountForInput,
+  formatAmountInputValue,
+  computeFormattedCaretIndex,
+} from '../utils/currency';
 import { getTranslations } from '../utils/languages';
 import { 
   Sparkles, 
@@ -48,8 +55,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   language = 'es',
 }) => {
   const t = getTranslations(language);
+  const currencySymbol = CURRENCIES[currency]?.symbol || '$';
   const [isEditingIncome, setIsEditingIncome] = useState(false);
-  const [tempIncome, setTempIncome] = useState(income.toString());
+  const [tempIncome, setTempIncome] = useState(() => formatAmountForInput(income, true));
 
   // Local state for savingsRate to ensure 60fps responsiveness on tablets without blocking the JS thread
   const [localSavingsRate, setLocalSavingsRate] = useState<number>(savingsRate);
@@ -99,9 +107,26 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
     onSavingsRateChange(rate);
   };
 
+  const handleIncomeInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = e.target;
+    const raw = inputEl.value;
+    const caret = inputEl.selectionStart;
+    const nextFormatted = formatAmountInputValue(raw, tempIncome);
+    const nextCaret = computeFormattedCaretIndex(raw, caret, nextFormatted);
+    setTempIncome(nextFormatted);
+    if (nextCaret !== null && typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(() => {
+        if (document.activeElement === inputEl) {
+          inputEl.setSelectionRange(nextCaret, nextCaret);
+        }
+      });
+    }
+  };
+
   const handleIncomeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const parsed = Number(tempIncome);
+    const trimmed = tempIncome.trim();
+    const parsed = trimmed === '' ? 0 : parseAmountInput(trimmed);
     if (!isNaN(parsed) && parsed >= 0) {
       onIncomeChange(parsed);
       setIsEditingIncome(false);
@@ -134,17 +159,21 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
             {/* Income Amount Display or Inline Edit Form */}
             {isEditingIncome ? (
               <form onSubmit={handleIncomeSubmit} className="flex items-center gap-2 mt-2 max-w-sm">
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={tempIncome}
-                  onChange={(e) => setTempIncome(e.target.value)}
-                  onFocus={(e) => e.target.select()}
-                  autoFocus
-                  placeholder={t.incomePlaceholder}
-                  className="w-full bg-white text-slate-900 border-2 border-white rounded-xl px-3.5 py-2 text-xl font-black focus:outline-hidden tabular-nums shadow-md"
-                />
+                <div className="flex items-center w-full bg-white border-2 border-white rounded-xl shadow-md">
+                  <span className="pl-3.5 pr-1 text-xl font-black text-slate-400 select-none shrink-0">
+                    {currencySymbol}
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={tempIncome}
+                    onChange={handleIncomeInputChange}
+                    onFocus={(e) => e.target.select()}
+                    autoFocus
+                    placeholder={t.incomePlaceholder}
+                    className="w-full min-w-0 bg-transparent text-slate-900 pr-3.5 py-2 text-xl font-black focus:outline-hidden tabular-nums"
+                  />
+                </div>
                 <button
                   type="submit"
                   className="p-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-colors cursor-pointer shrink-0 shadow-md"
@@ -165,7 +194,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setTempIncome(income.toString());
+                  setTempIncome(formatAmountForInput(income, true));
                   setIsEditingIncome(true);
                 }}
                 className="group flex items-baseline gap-2 text-left cursor-pointer transition-opacity hover:opacity-90 mt-1 focus:outline-hidden"

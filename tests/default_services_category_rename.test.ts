@@ -148,6 +148,7 @@ describe('NITA — Renombrado de categoría Servicios y replicación en gastos c
         onDeleteCategory: noop,
         language: 'es',
         daysInMonth: 30,
+        initialAddModalOpen: true,
       })
     );
 

@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { FixedExpense, CurrencyCode, CategoryInfo } from '../types/budget';
-import { formatCurrency, getCategoryInfo } from '../utils/currency';
+import {
+  CURRENCIES,
+  formatCurrency,
+  getCategoryInfo,
+  parseAmountInput,
+  formatAmountForInput,
+  formatAmountInputValue,
+  computeFormattedCaretIndex,
+} from '../utils/currency';
+export { parseAmountInput } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
 import { CategoryManagerModal } from './CategoryManagerModal';
 import { 
@@ -32,37 +41,7 @@ interface FixedExpensesSectionProps {
   onDeleteCategory: (id: string) => void;
   language?: string;
   daysInMonth?: number;
-}
-
-export function parseAmountInput(val: string | number): number {
-  if (typeof val === 'number') return isNaN(val) ? 0 : val;
-  if (!val) return 0;
-  let clean = String(val).replace(/[$€\s]/g, '').trim();
-  if (!clean) return 0;
-
-  if (clean.includes('.') && clean.includes(',')) {
-    if (clean.lastIndexOf('.') < clean.lastIndexOf(',')) {
-      clean = clean.replace(/\./g, '').replace(',', '.');
-    } else {
-      clean = clean.replace(/,/g, '');
-    }
-  } else if (clean.includes(',')) {
-    const parts = clean.split(',');
-    if (parts.length > 2) {
-      clean = clean.replace(/,/g, '');
-    } else {
-      clean = clean.replace(',', '.');
-    }
-  } else if (clean.includes('.')) {
-    const parts = clean.split('.');
-    if (parts.length > 2) {
-      clean = clean.replace(/\./g, '');
-    } else if (parts[1].length === 3 && parts[0].length >= 1) {
-      clean = clean.replace('.', '');
-    }
-  }
-  const parsed = parseFloat(clean);
-  return isNaN(parsed) ? 0 : parsed;
+  initialAddModalOpen?: boolean;
 }
 
 export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
@@ -80,6 +59,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   onDeleteCategory,
   language = 'es',
   daysInMonth = 31,
+  initialAddModalOpen = false,
 }) => {
   const t = getTranslations(language);
   const [name, setName] = useState('');
@@ -89,6 +69,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   const [filterState, setFilterState] = useState<'all' | 'pending' | 'paid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(initialAddModalOpen);
 
   // Sync category state when categories change or if current category is invalid
   useEffect(() => {
@@ -105,20 +86,63 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   const [editDueDate, setEditDueDate] = useState<string>('');
 
   useEffect(() => {
-    if (!editingExpenseId) return;
+    if (!editingExpenseId && !isAddModalOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setEditingExpenseId(null);
+        if (editingExpenseId) {
+          setEditingExpenseId(null);
+        } else if (isAddModalOpen) {
+          setIsAddModalOpen(false);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingExpenseId]);
+  }, [editingExpenseId, isAddModalOpen]);
+
+  const handleOpenAddModal = () => {
+    setName('');
+    setAmount('');
+    setDueDate('');
+    if (categories.length > 0 && (!category || !categories.some(c => c.id === category))) {
+      setCategory(categories[0].id);
+    }
+    setIsAddModalOpen(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false);
+    setName('');
+    setAmount('');
+    setDueDate('');
+  };
+
+  const currencySymbol = CURRENCIES[currency]?.symbol || '$';
+
+  const handleFormattedAmountChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    previousValue: string,
+    setter: (next: string) => void
+  ) => {
+    const inputEl = e.target;
+    const raw = inputEl.value;
+    const caret = inputEl.selectionStart;
+    const nextFormatted = formatAmountInputValue(raw, previousValue);
+    const nextCaret = computeFormattedCaretIndex(raw, caret, nextFormatted);
+    setter(nextFormatted);
+    if (nextCaret !== null && typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(() => {
+        if (document.activeElement === inputEl) {
+          inputEl.setSelectionRange(nextCaret, nextCaret);
+        }
+      });
+    }
+  };
 
   const startEditExpense = (expense: FixedExpense) => {
     setEditingExpenseId(expense.id);
     setEditName(expense.name || '');
-    setEditAmount(expense.amount ? String(expense.amount) : '');
+    setEditAmount(expense.amount ? formatAmountForInput(expense.amount) : '');
     setEditCategory(expense.category || categories[0]?.id || 'housing');
     setEditDueDate(expense.dueDate ? String(expense.dueDate) : '');
   };
@@ -166,6 +190,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
     setName('');
     setAmount('');
     setDueDate('');
+    setIsAddModalOpen(false);
   };
 
   // Safe defensively-coalesced expenses
@@ -248,102 +273,17 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
         </div>
       </div>
 
-      {/* New Expense Form Bar */}
-      <form onSubmit={handleAddSubmit} className="p-3.5 sm:p-5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 sm:gap-3.5 items-center">
-          
-          {/* Concept input */}
-          <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
-            <input
-              type="text"
-              placeholder={t.expenseConceptPlaceholder}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-3.5 py-2.5 text-sm placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500"
-              required
-            />
-          </div>
-
-          {/* Amount input & Category Selector in the same row on mobile and compact screens */}
-          <div className="sm:col-span-2 lg:col-span-5 xl:col-span-5 grid grid-cols-12 gap-2 sm:gap-3.5 items-center">
-            {/* Amount input (reduced on mobile: 5 cols out of 12) */}
-            <div className="col-span-5 sm:col-span-6 relative">
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder={t.amountPlaceholder}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-3 sm:px-3.5 py-2.5 text-xs sm:text-sm placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500 tabular-nums"
-                required
-              />
-            </div>
-
-            {/* Category Selector with Color indicator (7 cols out of 12 on mobile) */}
-            <div className="col-span-7 sm:col-span-6 flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <div 
-                className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full shrink-0 shadow-2xs border border-white dark:border-slate-700"
-                style={{ backgroundColor: currentCategoryInfo.color }}
-                title={`Color: ${currentCategoryInfo.label}`}
-              />
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 sm:px-3 py-2.5 text-xs sm:text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer truncate"
-              >
-                {sortedCategories.map((cat) => {
-                  const catInfo = getCategoryInfo(cat.id, categories, language);
-                  return (
-                    <option key={cat.id} value={cat.id} className="dark:bg-slate-800 dark:text-white">
-                      {catInfo.label} {cat.isCustom ? `(${t.customCategoryTag})` : ''}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          </div>
-
-          {/* Due date (optional) and Add Button */}
-          <div className="sm:col-span-2 lg:col-span-4 xl:col-span-3 flex items-center gap-2">
-            <div className="flex-1 min-w-[70px] relative" title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (opcional)`}>
-              <input
-                type="number"
-                min="1"
-                max={daysInMonth}
-                aria-label={`${t.dueDayShort} (opcional)`}
-                placeholder={`${t.dueDayShort} (1-${daysInMonth})`}
-                value={dueDate}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === '') {
-                    setDueDate('');
-                    return;
-                  }
-                  const num = parseInt(val, 10);
-                  if (!isNaN(num)) {
-                    if (num > daysInMonth) {
-                      setDueDate(String(daysInMonth));
-                    } else if (num < 1) {
-                      setDueDate('1');
-                    } else {
-                      setDueDate(val);
-                    }
-                  }
-                }}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden text-center tabular-nums"
-              />
-            </div>
-            <button
-              type="submit"
-              className="flex-1 min-w-[95px] flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold py-2.5 px-2.5 sm:px-3 rounded-xl transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4 shrink-0" />
-              <span>{t.addButton}</span>
-            </button>
-          </div>
-
-        </div>
-      </form>
+      {/* Unified Load Action Bar */}
+      <div className="px-4 sm:px-6 py-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={handleOpenAddModal}
+          data-testid="fixed-expenses-add-trigger"
+          className="w-full sm:w-auto min-h-[42px] inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-blue-500/40"
+        >
+          <span>CARGAR +</span>
+        </button>
+      </div>
 
       {/* Filter and Search Bar */}
       <div className="px-4 sm:px-6 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 text-xs">
@@ -516,6 +456,154 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
         )}
       </div>
 
+      {/* Centered Add Fixed Expense Modal */}
+      {isAddModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={handleCloseAddModal}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cargar Gasto Fijo"
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleAddSubmit}
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-3xl border border-blue-200 dark:border-blue-800 shadow-2xl space-y-4 transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <span className="text-sm sm:text-base font-black text-blue-900 dark:text-blue-300 flex items-center gap-2">
+                <span className="p-1.5 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
+                  <Plus className="w-4 h-4" />
+                </span>
+                Cargar Gasto Fijo
+              </span>
+              <button
+                type="button"
+                onClick={handleCloseAddModal}
+                title="Cerrar"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+              {/* Concepto / Nombre */}
+              <div className="sm:col-span-12">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Concepto
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t.expenseConceptPlaceholder}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500"
+                  autoFocus
+                  required
+                />
+              </div>
+
+              {/* Monto */}
+              <div className="sm:col-span-5">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Importe ({currency})
+                </label>
+                <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-blue-500 transition-colors">
+                  <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
+                    {currencySymbol}
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={amount}
+                    onChange={(e) => handleFormattedAmountChange(e, amount, setAmount)}
+                    placeholder="0,00"
+                    className="w-full min-w-0 bg-transparent pr-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Categoría */}
+              <div className="sm:col-span-4">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Categoría
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-white dark:border-slate-700"
+                    style={{ backgroundColor: currentCategoryInfo.color }}
+                    title={`Color: ${currentCategoryInfo.label}`}
+                  />
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer truncate"
+                  >
+                    {sortedCategories.map((cat) => {
+                      const catInfo = getCategoryInfo(cat.id, categories, language);
+                      return (
+                        <option key={cat.id} value={cat.id} className="dark:bg-slate-800 dark:text-white">
+                          {catInfo.label} {cat.isCustom ? `(${t.customCategoryTag})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {/* Vencimiento */}
+              <div className="sm:col-span-3">
+                <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                  Vto (1-{daysInMonth})
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={daysInMonth}
+                  aria-label={`${t.dueDayShort} (opcional)`}
+                  title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (opcional)`}
+                  value={dueDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '') {
+                      setDueDate('');
+                      return;
+                    }
+                    const num = parseInt(val, 10);
+                    if (!isNaN(num)) {
+                      if (num > daysInMonth) setDueDate(String(daysInMonth));
+                      else if (num < 1) setDueDate('1');
+                      else setDueDate(val);
+                    }
+                  }}
+                  placeholder="Opcional"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2.5 text-sm font-bold text-center tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={handleCloseAddModal}
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Cargar Gasto</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Centered Edit Fixed Expense Modal */}
       {(() => {
         const editingExpense = editingExpenseId
@@ -592,15 +680,20 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                     Importe ({currency})
                   </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={editAmount}
-                    onChange={(e) => setEditAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
-                    required
-                  />
+                  <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-blue-500 transition-colors">
+                    <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
+                      {currencySymbol}
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={editAmount}
+                      onChange={(e) => handleFormattedAmountChange(e, editAmount, setEditAmount)}
+                      placeholder="0,00"
+                      className="w-full min-w-0 bg-transparent pr-3.5 py-2.5 text-sm font-bold tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
+                      required
+                    />
+                  </div>
                 </div>
 
                 {/* Categoría */}
