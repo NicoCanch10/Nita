@@ -1868,4 +1868,69 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2Q — La ruta rápida canónica no debe aceptar variantes alteradas', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    for (const acc of accounts) {
+      test(`49. Categorías globales: rechazar ID vacío en lista similar a defaults | ${acc.accountType}`, async (t) => {
+        if (!isEmulatorAvailable || !testEnv) {
+          t.skip('Emulador de Firestore no disponible en este entorno');
+          return;
+        }
+        const uid = `${acc.prefix}_b22q_global_invalid_id`;
+        const db = await setupAuthenticatedMonthContext(testEnv, acc.accountType, uid);
+        const categories = buildDiagnosticCategories(11);
+        categories[5].id = '';
+        try {
+          await setDoc(doc(db, 'users', uid, 'categories', 'global'), {
+            userId: uid, categories, updatedAt: new Date().toISOString(),
+          });
+          assert.fail('La lista alterada no debe ser aceptada como predeterminada canónica');
+        } catch (err) {
+          if (err instanceof Error && err.message.includes('no debe ser aceptada')) throw err;
+          const result = classifyRuleError(err);
+          assert.notEqual(result.classification, 'ALLOWED');
+          console.log(`[B-2.2Q] global_invalid_id | account=${acc.accountType} | result=${result.classification}`);
+        }
+      });
+
+      test(`50. Mes: rechazar label excesivo en lista similar a defaults | ${acc.accountType}`, async (t) => {
+        if (!isEmulatorAvailable || !testEnv) {
+          t.skip('Emulador de Firestore no disponible en este entorno');
+          return;
+        }
+        const uid = `${acc.prefix}_b22q_month_invalid_label`;
+        const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+          categories: 11, fixedExpenses: 0, variableExpenses: 0,
+        });
+        payload.categories[10].label = 'X'.repeat(101);
+        const result = await executeDiagnosticMonthWrite(
+          testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+        );
+        assert.notEqual(result.classification, 'ALLOWED', 'No debe aceptarse una variante alterada del array canónico');
+        console.log(`[B-2.2Q] month_invalid_label | account=${acc.accountType} | result=${result.classification}`);
+      });
+
+      test(`51. Mes: rechazar clave adicional no autorizada en categoría predeterminada | ${acc.accountType}`, async (t) => {
+        if (!isEmulatorAvailable || !testEnv) {
+          t.skip('Emulador de Firestore no disponible en este entorno');
+          return;
+        }
+        const uid = `${acc.prefix}_b22q_month_extra_key`;
+        const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+          categories: 11, fixedExpenses: 0, variableExpenses: 0,
+        });
+        payload.categories[0].admin = true;
+        const result = await executeDiagnosticMonthWrite(
+          testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+        );
+        assert.notEqual(result.classification, 'ALLOWED', 'No debe aceptarse una clave adicional no autorizada');
+        console.log(`[B-2.2Q] month_extra_key | account=${acc.accountType} | result=${result.classification}`);
+      });
+    }
+  });
+
 });
