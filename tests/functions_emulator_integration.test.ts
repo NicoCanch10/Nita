@@ -139,6 +139,14 @@ function extractCallableErrorCode(err: unknown): string {
   return 'unknown';
 }
 
+async function waitUntilUnixSecondExceeds(referenceUnixSec: number, safetyMarginMs = 150): Promise<void> {
+  const targetMs = (referenceUnixSec + 1) * 1000 + safetyMarginMs;
+  while (Date.now() < targetMs) {
+    const remainingMs = targetMs - Date.now();
+    await new Promise((resolve) => setTimeout(resolve, Math.max(remainingMs, 10)));
+  }
+}
+
 describe('NITA Backend Etapa 2A.1.1 — Pruebas de Integración Reales (Functions + Auth + Firestore Emulators)', () => {
   let adminApp: AdminAppLike;
   let adminDb: AdminDb;
@@ -536,6 +544,12 @@ describe('NITA Backend Etapa 2A.1.1 — Pruebas de Integración Reales (Function
     const secondLogin = await signInFn({ username: 'cambio_clave', password: 'ClaveInicial#1' });
     const userCred2 = await signInWithCustomToken(secondaryClientAuth, secondLogin.data.customToken);
     const staleIdToken = await userCred2.user.getIdToken();
+    const decodedStaleToken = await adminAuth.verifyIdToken(staleIdToken, true);
+    const staleAuthTimeSec = Number(decodedStaleToken.auth_time);
+    assert.ok(Number.isInteger(staleAuthTimeSec) && staleAuthTimeSec > 0);
+    const staleIatSec = Number(decodedStaleToken.iat);
+    const staleTokenMaxSec =
+      Number.isInteger(staleIatSec) && staleIatSec > staleAuthTimeSec ? staleIatSec : staleAuthTimeSec;
 
     const secretBefore = (await adminDb.collection('accountSecrets').doc('cambio_clave').get()).data()!;
 
@@ -546,6 +560,9 @@ describe('NITA Backend Etapa 2A.1.1 — Pruebas de Integración Reales (Function
     const secretAfterWrong = (await adminDb.collection('accountSecrets').doc('cambio_clave').get()).data()!;
     assert.equal(secretAfterWrong.sessionEpoch, 1);
     assert.equal(secretAfterWrong.passwordHash, secretBefore.passwordHash);
+
+    await waitUntilUnixSecondExceeds(staleTokenMaxSec);
+    assert.ok(Math.floor(Date.now() / 1000) > staleTokenMaxSec);
 
     const changed = await changePassFn({
       currentPassword: 'ClaveInicial#1',

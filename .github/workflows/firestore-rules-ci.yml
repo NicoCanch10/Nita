@@ -69,6 +69,7 @@ jobs:
             tests/username_password_auth.test.ts
 
       - name: Run Firestore Security Rules Tests (Emulator - Strict Mode)
+        id: rules_tests
         env:
           FIREBASE_PROJECT_ID: "demo-nita-ci-test"
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
@@ -77,7 +78,8 @@ jobs:
           firebase emulators:exec --only firestore --project demo-nita-ci-test \
             "npx tsx --test tests/firestore_rules_emulator.test.ts"
 
-      - name: Run Cloud Functions & Frontend Auth Integration Tests (Local Emulators Only)
+      - name: Run Cloud Functions Integration Tests (Local Emulators Only)
+        if: ${{ !cancelled() && steps.rules_tests.outcome == 'success' }}
         env:
           FIREBASE_PROJECT_ID: "demo-nita-etapa2a1"
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
@@ -91,4 +93,21 @@ jobs:
           trap 'rm -f functions/.secret.local' EXIT
           printf 'NITA_HASH_PEPPER=%s\n' "$NITA_HASH_PEPPER" > functions/.secret.local
           firebase emulators:exec --only auth,firestore,functions --project demo-nita-etapa2a1 \
-            "npx tsx --test tests/functions_emulator_integration.test.ts && npx tsx --test tests/frontend_auth_integration.test.ts"
+            "npx tsx --test tests/functions_emulator_integration.test.ts"
+
+      - name: Run Frontend Auth Integration Tests (Local Emulators Only)
+        if: ${{ !cancelled() && steps.rules_tests.outcome == 'success' }}
+        env:
+          FIREBASE_PROJECT_ID: "demo-nita-etapa2a1"
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+          FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099"
+          FUNCTIONS_EMULATOR_HOST: "127.0.0.1:5001"
+          NITA_FIRESTORE_DATABASE_ID: "ai-studio-distribuidordedi-aff91045-91e1-4730-8049-ab5f53276b3f"
+          NITA_HASH_PEPPER: "nita-test-emulator-pepper-0123456789"
+          NITA_USE_FIREBASE_EMULATORS: "true"
+          NITA_EMULATOR_PROJECT_ID: "demo-nita-etapa2a1"
+        run: |
+          trap 'rm -f functions/.secret.local' EXIT
+          printf 'NITA_HASH_PEPPER=%s\n' "$NITA_HASH_PEPPER" > functions/.secret.local
+          firebase emulators:exec --only auth,firestore,functions --project demo-nita-etapa2a1 \
+            "npx tsx --test tests/frontend_auth_integration.test.ts"
