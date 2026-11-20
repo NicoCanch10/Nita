@@ -1574,4 +1574,98 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2J — Aislamiento individual de campos opcionales y costo de description', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+
+    const optionalFieldScenarios = [
+      { label: 'todos_presentes', omit: [] as string[] },
+      { label: 'solo_jarAdjustments_omitido', omit: ['jarAdjustments'] },
+      { label: 'solo_lastJarAdjustmentLog_omitido', omit: ['lastJarAdjustmentLog'] },
+      { label: 'solo_updatedAt_omitido', omit: ['updatedAt'] },
+    ];
+
+    for (const scenario of optionalFieldScenarios) {
+      for (const acc of accounts) {
+        const uid = `${acc.prefix}_b22j_month_optional_${scenario.label}`;
+        test(`42. Campos opcionales mes=${scenario.label} | ${acc.accountType} | create`, async (t) => {
+          if (!isEmulatorAvailable || !testEnv) {
+            t.skip('Emulador de Firestore no disponible en este entorno');
+            return;
+          }
+
+          const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+            categories: 0, fixedExpenses: 0, variableExpenses: 0,
+          });
+          const raw = payload as unknown as Record<string, unknown>;
+          for (const field of scenario.omit) delete raw[field];
+
+          const result = await executeDiagnosticMonthWrite(
+            testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+          );
+          console.log(
+            `[B-2.2J] scenario=${scenario.label} | account=${acc.accountType} | result=${result.classification} | error=${result.fullError ?? 'none'}`
+          );
+          assert.ok(
+            ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+            `Clasificación inesperada: ${result.classification}`
+          );
+        });
+      }
+    }
+
+    const descriptionScenarios = [
+      { label: 'todas_presentes', keep: 'all' as const },
+      { label: 'una_omitida_indice_0', keep: 'all_except_0' as const },
+      { label: 'una_omitida_indice_2', keep: 'all_except_2' as const },
+      { label: 'una_omitida_indice_5', keep: 'all_except_5' as const },
+      { label: 'solo_indice_0_presente', keep: 'only_0' as const },
+      { label: 'solo_indice_2_presente', keep: 'only_2' as const },
+      { label: 'solo_indice_5_presente', keep: 'only_5' as const },
+      { label: 'todas_omitidas', keep: 'none' as const },
+    ];
+
+    for (const scenario of descriptionScenarios) {
+      for (const acc of accounts) {
+        const uid = `${acc.prefix}_b22j_variable_desc_${scenario.keep}`;
+        test(`43. Seis variables description=${scenario.label} | ${acc.accountType} | create`, async (t) => {
+          if (!isEmulatorAvailable || !testEnv) {
+            t.skip('Emulador de Firestore no disponible en este entorno');
+            return;
+          }
+
+          const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+            categories: 0, fixedExpenses: 0, variableExpenses: 6,
+          });
+          const expenses = payload.variableExpenses as Array<Record<string, unknown>>;
+          for (let i = 0; i < expenses.length; i++) {
+            const keepDescription =
+              scenario.keep === 'all' ||
+              (scenario.keep === 'all_except_0' && i !== 0) ||
+              (scenario.keep === 'all_except_2' && i !== 2) ||
+              (scenario.keep === 'all_except_5' && i !== 5) ||
+              (scenario.keep === 'only_0' && i === 0) ||
+              (scenario.keep === 'only_2' && i === 2) ||
+              (scenario.keep === 'only_5' && i === 5);
+            if (!keepDescription) delete expenses[i].description;
+          }
+
+          const result = await executeDiagnosticMonthWrite(
+            testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+          );
+          console.log(
+            `[B-2.2J] scenario=${scenario.label} | account=${acc.accountType} | result=${result.classification} | error=${result.fullError ?? 'none'}`
+          );
+          assert.ok(
+            ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+            `Clasificación inesperada: ${result.classification}`
+          );
+        });
+      }
+    }
+  });
+
 });
