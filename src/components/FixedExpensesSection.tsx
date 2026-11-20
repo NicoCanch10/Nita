@@ -245,11 +245,11 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
           <button
             type="button"
             onClick={() => setIsCategoryModalOpen(true)}
-            className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-colors cursor-pointer shadow-2xs text-xs shrink-0 self-center"
+            className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-colors cursor-pointer shadow-2xs text-xs shrink-0 self-center whitespace-nowrap"
             title={t.categoriesAndColorsBtn}
           >
             <Palette className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-            <span className="leading-tight">{t.categoriesAndColorsBtn}</span>
+            <span className="leading-tight whitespace-nowrap">{t.categoriesAndColorsBtn}</span>
           </button>
         </div>
 
@@ -343,7 +343,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
       </div>
 
       {/* Expense List */}
-      <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
+      <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto no-scrollbar">
         {filteredExpenses.length === 0 ? (
           <div className="py-12 text-center px-4">
             <Receipt className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
@@ -361,12 +361,12 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
               <div
                 key={expense.id}
                 data-testid="fixed-expense-item"
-                className={`p-3.5 sm:p-4 flex items-center justify-between gap-2.5 sm:gap-4 hover:bg-slate-50/80 dark:hover:bg-slate-850/60 transition-colors ${
+                className={`px-4 py-4 sm:px-5 sm:py-4.5 flex items-center justify-between gap-3 sm:gap-4 hover:bg-slate-50/80 dark:hover:bg-slate-850/60 transition-colors ${
                   expense.isPaid ? 'bg-emerald-50/25 dark:bg-emerald-950/20' : ''
                 }`}
               >
                 {/* Checkbox & Concept */}
-                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+                <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
                   <button
                     type="button"
                     onClick={() => onTogglePaid(expense.id)}
@@ -374,21 +374,21 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                     className="text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer shrink-0 flex items-center justify-center"
                   >
                     {expense.isPaid ? (
-                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                      <CheckCircle className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-emerald-600 dark:text-emerald-400" />
                     ) : (
-                      <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />
+                      <Circle className="w-5 h-5 sm:w-[22px] sm:h-[22px] text-slate-300 dark:text-slate-600" />
                     )}
                   </button>
 
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <p className="text-sm font-bold text-slate-900 dark:text-white leading-snug break-words">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <p className="text-[15px] sm:text-base font-bold text-slate-900 dark:text-white leading-snug break-words">
                       {expense.name}
                     </p>
 
-                    <div className="flex items-center gap-x-2 gap-y-1 text-2xs text-slate-500 dark:text-slate-400 flex-wrap min-w-0">
+                    <div className="flex items-center gap-x-2.5 gap-y-1 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 flex-wrap min-w-0">
                       {/* Dynamic Category Badge with custom color (never overlaps value) */}
                       <span 
-                        className="inline-flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded-md border text-[10px] leading-tight max-w-full min-w-0"
+                        className="inline-flex items-center gap-1.5 font-semibold px-2 py-0.5 rounded-md border text-[11px] sm:text-xs leading-tight max-w-full min-w-0"
                         style={{ 
                           backgroundColor: `${cat.color}15`, 
                           color: cat.color,
@@ -396,7 +396,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                         }}
                       >
                         <span 
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          className="w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: cat.color }}
                         />
                         <span className="break-words text-left">{cat.label}</span>
@@ -406,7 +406,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                         <>
                           <span aria-hidden="true" className="hidden sm:inline">·</span>
                           <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                            <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                             <span>{t.dueDayShort} {expense.dueDate}</span>
                           </span>
                         </>
@@ -418,13 +418,13 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 </div>
 
                 {/* Amount (with PAGADO badge centered below) and actions */}
-                <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+                <div className="flex items-center gap-2 sm:gap-3.5 shrink-0">
                   <div className="flex flex-col items-center justify-center text-center shrink-0">
-                    <span className="text-sm font-black tabular-nums leading-tight text-slate-900 dark:text-white whitespace-nowrap">
+                    <span className="text-[15px] sm:text-base font-black tabular-nums leading-tight text-slate-900 dark:text-white whitespace-nowrap">
                       {formatCurrency(expense.amount, currency)}
                     </span>
                     {expense.isPaid && (
-                      <span className="mt-1 inline-flex items-center justify-center text-[10px] leading-none text-emerald-700 dark:text-emerald-300 font-extrabold uppercase tracking-wide bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200/70 dark:border-emerald-800/60 px-1.5 py-0.5 rounded">
+                      <span className="mt-1 inline-flex items-center justify-center text-[11px] leading-none text-emerald-700 dark:text-emerald-300 font-extrabold uppercase tracking-wide bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200/70 dark:border-emerald-800/60 px-2 py-0.5 rounded">
                         {t.paidStatus}
                       </span>
                     )}
@@ -435,18 +435,18 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                       type="button"
                       onClick={() => startEditExpense(expense)}
                       title="Editar gasto (concepto, monto, categoría o vencimiento)"
-                      className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-xl transition-colors cursor-pointer shrink-0"
+                      className="p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-xl transition-colors cursor-pointer shrink-0"
                     >
-                      <Pencil className="w-4 h-4" />
+                      <Pencil className="w-4 h-4 sm:w-[17px] sm:h-[17px]" />
                     </button>
 
                     <button
                       type="button"
                       onClick={() => onDeleteExpense(expense.id)}
                       title="Eliminar gasto"
-                      className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition-colors cursor-pointer shrink-0"
+                      className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition-colors cursor-pointer shrink-0"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4 sm:w-[17px] sm:h-[17px]" />
                     </button>
                   </div>
                 </div>

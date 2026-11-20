@@ -341,7 +341,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
       </div>
 
       {/* Expense List */}
-      <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-80 overflow-y-auto">
+      <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-80 overflow-y-auto no-scrollbar">
         {filteredExpenses.length === 0 ? (
           <div className="py-12 text-center px-4">
             <ShoppingBag className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
@@ -357,16 +357,16 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
             return (
               <div
                 key={expense.id}
-                className="p-3.5 sm:p-4 flex items-center justify-between gap-3 hover:bg-slate-50/80 dark:hover:bg-slate-850/60 transition-colors"
+                className="px-4 py-4 sm:px-5 sm:py-4.5 flex items-center justify-between gap-3 sm:gap-4 hover:bg-slate-50/80 dark:hover:bg-slate-850/60 transition-colors"
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <p className="text-[15px] sm:text-base font-bold text-slate-900 dark:text-white leading-snug truncate">
                       {expense.description}
                     </p>
-                    <div className="flex items-center gap-2 text-2xs text-slate-500 dark:text-slate-400 mt-0.5 flex-wrap">
+                    <div className="flex items-center gap-2.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 flex-wrap">
                       <span 
-                        className="font-semibold px-1.5 py-0.5 rounded-md text-[10px] leading-tight border inline-flex items-center gap-1"
+                        className="font-semibold px-2 py-0.5 rounded-md text-[11px] sm:text-xs leading-tight border inline-flex items-center gap-1.5"
                         style={{
                           backgroundColor: `${cat.color}15`,
                           color: cat.color,
@@ -374,22 +374,22 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                         }}
                       >
                         <span 
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          className="w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: cat.color }}
                         />
                         {cat.label}
                       </span>
                       <span aria-hidden="true" className="hidden sm:inline">·</span>
                       <span className="flex items-center gap-1 text-slate-400 dark:text-slate-500">
-                        <Clock className="w-3 h-3" />
+                        <Clock className="w-3.5 h-3.5" />
                         {formatDateByLanguage(expense.date, language)}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-                  <span className="text-sm font-black text-slate-900 dark:text-white tabular-nums">
+                <div className="flex items-center gap-2 sm:gap-3.5 shrink-0">
+                  <span className="text-[15px] sm:text-base font-black text-slate-900 dark:text-white tabular-nums">
                     {formatCurrency(expense.amount, currency)}
                   </span>
 
@@ -398,9 +398,9 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                       type="button"
                       onClick={() => startEditExpense(expense)}
                       title="Editar gasto (descripción, monto, categoría o fecha)"
-                      className="p-1.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 rounded-xl transition-colors cursor-pointer"
+                      className="p-1.5 sm:p-2 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 rounded-xl transition-colors cursor-pointer"
                     >
-                      <Pencil className="w-4 h-4" />
+                      <Pencil className="w-4 h-4 sm:w-[17px] sm:h-[17px]" />
                     </button>
                   )}
 
@@ -408,9 +408,9 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                     type="button"
                     onClick={() => onDeleteExpense(expense.id)}
                     title={t.deleteExpense}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition-colors cursor-pointer"
+                    className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition-colors cursor-pointer"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4 sm:w-[17px] sm:h-[17px]" />
                   </button>
                 </div>
               </div>

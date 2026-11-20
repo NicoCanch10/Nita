@@ -21,6 +21,7 @@ interface FinancialHealthSectionProps {
   daysInMonth: number;
   exactWeeks: number;
   language?: string;
+  collapsible?: boolean;
 }
 
 export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
@@ -32,10 +33,12 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   currency,
   daysInMonth,
   language = 'es',
+  collapsible = true,
 }) => {
   const t = getTranslations(language);
-  // Collapsed by default as requested
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Collapsed by default only when collapsible (general menu); always expanded in dedicated tab
+  const [isExpanded, setIsExpanded] = useState(!collapsible);
+  const showContent = !collapsible || isExpanded;
 
   // Simulator states
   const [simSavingReduction, setSimSavingReduction] = useState<number>(30000);
@@ -86,44 +89,54 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   // Sorted categories by highest percentage to lowest percentage
   const sortedCategoryEntries = Object.entries(categoryTotals).sort(([, a], [, b]) => b - a);
 
+  const headerTitleContent = (
+    <div className="flex items-center gap-3 min-w-0">
+      <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 rounded-xl shrink-0">
+        <PieChart className="w-5 h-5" />
+      </div>
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-snug sm:truncate">
+            {t.healthTitle}
+          </h2>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+          {t.rule503020Summary}
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xs overflow-hidden transition-colors">
       
-      {/* Toggle Header Button: Collapsed by default */}
-      <button
-        type="button"
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full p-4 sm:p-5 flex items-center justify-between gap-4 text-left hover:bg-slate-50/80 dark:hover:bg-slate-850/60 transition-colors cursor-pointer"
-        aria-expanded={isExpanded}
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 rounded-xl shrink-0">
-            <PieChart className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white truncate">
-                {t.healthTitle}
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-              {t.rule503020Summary}
-            </p>
-          </div>
-        </div>
+      {/* Header: Toggle button in general view, static section header in standalone view */}
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="w-full p-4 sm:p-5 flex items-center justify-between gap-4 text-left hover:bg-slate-50/80 dark:hover:bg-slate-850/60 transition-colors cursor-pointer"
+          aria-expanded={isExpanded}
+        >
+          {headerTitleContent}
 
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hidden sm:inline">
-            {isExpanded ? 'Contraer' : 'Desplegar'}
-          </span>
-          <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hidden sm:inline">
+              {isExpanded ? 'Contraer' : 'Desplegar'}
+            </span>
+            <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </div>
           </div>
+        </button>
+      ) : (
+        <div className="w-full p-4 sm:p-6 flex items-center justify-between gap-4 text-left">
+          {headerTitleContent}
         </div>
-      </button>
+      )}
 
       {/* Expanded Content */}
-      {isExpanded && (
+      {showContent && (
         <div className="p-4 sm:p-6 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 animate-in fade-in duration-200">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             

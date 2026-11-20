@@ -2046,17 +2046,20 @@ function MainApp() {
         )}
 
         {activeTab === 'health' && (
-          <FinancialHealthSection
-            income={income}
-            savingsRate={savingsRate}
-            fixedExpenses={fixedExpenses}
-            variableExpenses={variableExpenses}
-            categories={categories}
-            currency={currency}
-            daysInMonth={daysInMonth}
-            exactWeeks={4}
-            language={language}
-          />
+          <div className="space-y-6">
+            <FinancialHealthSection
+              income={income}
+              savingsRate={savingsRate}
+              fixedExpenses={fixedExpenses}
+              variableExpenses={variableExpenses}
+              categories={categories}
+              currency={currency}
+              daysInMonth={daysInMonth}
+              exactWeeks={4}
+              language={language}
+              collapsible={false}
+            />
+          </div>
         )}
         </div>
 
