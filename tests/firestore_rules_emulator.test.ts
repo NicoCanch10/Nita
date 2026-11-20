@@ -1933,4 +1933,46 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2R — Los campos obligatorios siguen siendo exigidos sin hasAll redundante', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    const targets = [
+      { target: 'categories' as const, fields: ['id', 'label', 'color'] },
+      { target: 'fixedExpenses' as const, fields: ['id', 'name', 'amount', 'category', 'isPaid'] },
+      { target: 'variableExpenses' as const, fields: ['id', 'date', 'amount', 'category'] },
+    ];
+    for (const scenario of targets) {
+      for (const field of scenario.fields) {
+        for (const acc of accounts) {
+          const uid = `${acc.prefix}_b22r_missing_${scenario.target}_${field}`;
+          test(`52. Rechazar campo obligatorio ausente: ${scenario.target}.${field} | ${acc.accountType}`, async (t) => {
+            if (!isEmulatorAvailable || !testEnv) {
+              t.skip('Emulador de Firestore no disponible en este entorno');
+              return;
+            }
+            const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+              categories: scenario.target === 'categories' ? 1 : 0,
+              fixedExpenses: scenario.target === 'fixedExpenses' ? 1 : 0,
+              variableExpenses: scenario.target === 'variableExpenses' ? 1 : 0,
+            });
+            const targetList = payload[scenario.target] as Array<Record<string, unknown>>;
+            delete targetList[0][field];
+
+            const result = await executeDiagnosticMonthWrite(
+              testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+            );
+            assert.equal(
+              result.classification,
+              'SECURITY_VALIDATION_DENIED',
+              `El campo obligatorio ausente debe rechazarse por validación, no por CEL: ${result.fullError ?? result.classification}`
+            );
+          });
+        }
+      }
+    }
+  });
+
 });
