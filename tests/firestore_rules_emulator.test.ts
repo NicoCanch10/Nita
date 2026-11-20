@@ -1359,4 +1359,65 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
       }
     }
   });
+
+
+  describe('B-2.2F — Aislamiento de validación de categorías globales y autorización', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+
+    for (const categoryCount of Array.from({ length: 13 }, (_, index) => index)) {
+      for (const acc of accounts) {
+        const uid = `${acc.prefix}_global_categories_c${categoryCount}`;
+        test(`37. Categorías globales categories=${categoryCount} | ${acc.accountType}`, async (t) => {
+          if (!isEmulatorAvailable || !testEnv) {
+            t.skip('Emulador de Firestore no disponible en este entorno');
+            return;
+          }
+
+          const db = await setupAuthenticatedMonthContext(testEnv, acc.accountType, uid);
+          const payload = {
+            userId: uid,
+            categories: buildDiagnosticCategories(categoryCount),
+            updatedAt: new Date().toISOString(),
+          };
+
+          try {
+            await setDoc(doc(db, 'users', uid, 'categories', 'global'), payload);
+            console.log(`[B-2.2F] path=users/${uid}/categories/global | account=${acc.accountType} | categories=${categoryCount} | result=ALLOWED`);
+          } catch (err: unknown) {
+            const { classification, fullError } = classifyRuleError(err);
+            console.log(`[B-2.2F] path=users/${uid}/categories/global | account=${acc.accountType} | categories=${categoryCount} | result=REJECTED (${classification}) | error=${fullError}`);
+          }
+        });
+      }
+    }
+
+    for (const acc of accounts) {
+      const uid = `${acc.prefix}_authorization_baseline`;
+      test(`38. Autorización aislada mediante get de perfil | ${acc.accountType}`, async (t) => {
+        if (!isEmulatorAvailable || !testEnv) {
+          t.skip('Emulador de Firestore no disponible en este entorno');
+          return;
+        }
+
+        const db = await setupAuthenticatedMonthContext(testEnv, acc.accountType, uid);
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await setDoc(doc(ctx.firestore(), 'users', uid), {
+            uid,
+            updatedAt: new Date().toISOString(),
+          });
+        });
+
+        try {
+          await getDoc(doc(db, 'users', uid));
+          console.log(`[B-2.2F] path=users/${uid} | account=${acc.accountType} | operation=get | result=ALLOWED`);
+        } catch (err: unknown) {
+          const { classification, fullError } = classifyRuleError(err);
+          console.log(`[B-2.2F] path=users/${uid} | account=${acc.accountType} | operation=get | result=REJECTED (${classification}) | error=${fullError}`);
+        }
+      });
+    }
+  });
 });
