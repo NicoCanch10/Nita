@@ -1711,4 +1711,44 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2L — Costo de una sola description con campos opcionales del mes omitidos', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    for (const keepIndex of [0, 2, 5] as const) {
+      for (const acc of accounts) {
+        const uid = `${acc.prefix}_b22l_one_description_${keepIndex}`;
+        test(`45. Seis variables, solo description[ ${keepIndex} ] presente, opcionales del mes omitidos | ${acc.accountType}`, async (t) => {
+          if (!isEmulatorAvailable || !testEnv) {
+            t.skip('Emulador de Firestore no disponible en este entorno');
+            return;
+          }
+          const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+            categories: 0, fixedExpenses: 0, variableExpenses: 6,
+          });
+          const raw = payload as unknown as Record<string, unknown>;
+          delete raw.jarAdjustments;
+          delete raw.lastJarAdjustmentLog;
+          delete raw.updatedAt;
+          for (let i = 0; i < payload.variableExpenses.length; i++) {
+            if (i !== keepIndex) delete payload.variableExpenses[i].description;
+          }
+
+          const result = await executeDiagnosticMonthWrite(
+            testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+          );
+          console.log(
+            `[B-2.2L] descriptionIndex=${keepIndex} | account=${acc.accountType} | result=${result.classification} | error=${result.fullError ?? 'none'}`
+          );
+          assert.ok(
+            ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+            `Clasificación inesperada: ${result.classification}`
+          );
+        });
+      }
+    }
+  });
+
 });
