@@ -304,8 +304,7 @@ service cloud.firestore {
     function isValidCategoriesDoc(userId, data) {
       let k = data.keys();
       let updatedAt = data.get('updatedAt', '2026-01-01T00:00:00Z');
-      return k.hasAll(['userId', 'categories'])
-        && k.hasOnly(['userId', 'categories', 'updatedAt'])
+      return k.hasOnly(['userId', 'categories', 'updatedAt'])
         && data.userId == userId
         && areValidCategories(data.categories)
         && updatedAt is string && updatedAt.size() >= 10 && updatedAt.size() <= 50;
@@ -339,11 +338,7 @@ service cloud.firestore {
 
     function isValidMonthDoc(userId, monthKey, data) {
       let k = data.keys();
-      return k.hasAll([
-          'userId', 'monthKey', 'year', 'month', 'income', 'savingsRate',
-          'extraDaysPosition', 'categories', 'fixedExpenses', 'variableExpenses'
-        ])
-        && (
+      return (
           k.size() == 10
           || (
             k.hasOnly([
