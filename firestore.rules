@@ -111,8 +111,7 @@ service cloud.firestore {
     // 4. Validadores estructurales de listas y documentos financieros
     function isValidCategoryMap(cat) {
       let k = cat.keys();
-      return k.hasAll(['id', 'label', 'color'])
-        && (
+      return (
           k.size() == 3
           || (
             k.hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
@@ -132,8 +131,7 @@ service cloud.firestore {
 
     function isValidFixedExpenseMap(exp) {
       let k = exp.keys();
-      return k.hasAll(['id', 'name', 'amount', 'category', 'isPaid'])
-        && (
+      return (
           k.size() == 5
           || (
             k.hasOnly(['id', 'name', 'amount', 'category', 'isPaid', 'dueDate', 'notes'])
@@ -154,8 +152,7 @@ service cloud.firestore {
 
     function isValidVariableExpenseMap(exp) {
       let k = exp.keys();
-      return k.hasAll(['id', 'date', 'amount', 'category'])
-        && (
+      return (
           k.size() == 4
           || (
             k.hasOnly(['id', 'date', 'description', 'amount', 'category'])
