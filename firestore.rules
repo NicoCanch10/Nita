@@ -191,8 +191,25 @@ service cloud.firestore {
         );
     }
 
+    function isCanonicalDefaultCategories(cats) {
+      return cats == [
+        { 'id': 'housing', 'label': 'Vivienda y Alquiler', 'color': '#4f46e5' },
+        { 'id': 'services', 'label': 'Servicios', 'color': '#0284c7' },
+        { 'id': 'debt', 'label': 'Tarjetas y Deudas', 'color': '#e11d48' },
+        { 'id': 'food', 'label': 'Alimentación y Supermercado', 'color': '#16a34a' },
+        { 'id': 'transport', 'label': 'Transporte y Combustible', 'color': '#d97706' },
+        { 'id': 'health', 'label': 'Salud y Farmacia', 'color': '#0d9488' },
+        { 'id': 'subscriptions', 'label': 'Suscripciones y Conectividad', 'color': '#7c3aed' },
+        { 'id': 'leisure', 'label': 'Ocio, Salidas y Gustos', 'color': '#db2777' },
+        { 'id': 'education', 'label': 'Educación y Cursos', 'color': '#2563eb' },
+        { 'id': 'savings', 'label': 'Ahorro e Inversión', 'color': '#059669' },
+        { 'id': 'other', 'label': 'Otros Gastos', 'color': '#64748b' }
+      ];
+    }
+
     function areValidCategories(cats) {
-      return cats is list && areValidCategoryElements(cats);
+      return cats is list
+        && (isCanonicalDefaultCategories(cats) || areValidCategoryElements(cats));
     }
 
     function areValidFixedExpenseElements(list) {
