@@ -1515,4 +1515,63 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2I — Aislamiento de campos opcionales del mes y descripción variable', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    const countsToTest = [0, 1, 2, 3, 4, 5, 6] as const;
+    const targets = [
+      { target: 'fixedExpenses', omitDescription: false },
+      { target: 'variableExpenses', omitDescription: false },
+      { target: 'variableExpenses', omitDescription: true },
+    ] as const;
+
+    for (const scenario of targets) {
+      for (const count of countsToTest) {
+        for (const acc of accounts) {
+          const uid = `${acc.prefix}_b22i_${scenario.target}_n${count}_desc${scenario.omitDescription ? '0' : '1'}`;
+          test(`41. Mes mínimo ${scenario.target}=${count}, descripción omitida=${scenario.omitDescription} | ${acc.accountType} | create`, async (t) => {
+            if (!isEmulatorAvailable || !testEnv) {
+              t.skip('Emulador de Firestore no disponible en este entorno');
+              return;
+            }
+
+            const payload = buildDiagnosticMonthPayload(uid, '2026-11', 2026, 10, {
+              categories: 0,
+              fixedExpenses: scenario.target === 'fixedExpenses' ? count : 0,
+              variableExpenses: scenario.target === 'variableExpenses' ? count : 0,
+            });
+
+            // Deja exactamente los 10 campos obligatorios del documento mensual.
+            const rawPayload = payload as unknown as Record<string, unknown>;
+            delete rawPayload.jarAdjustments;
+            delete rawPayload.lastJarAdjustmentLog;
+            delete rawPayload.updatedAt;
+
+            // Control adicional: description es opcional en gastos variables.
+            if (scenario.target === 'variableExpenses' && scenario.omitDescription) {
+              for (const expense of payload.variableExpenses) {
+                delete expense.description;
+              }
+            }
+
+            const result = await executeDiagnosticMonthWrite(
+              testEnv, acc.accountType, uid, 'create', '2026-11', 2026, 10, payload
+            );
+
+            console.log(
+              `[B-2.2I] target=${scenario.target} | count=${count} | monthOptionalFields=omitted | descriptionOmitted=${scenario.omitDescription} | account=${acc.accountType} | operation=create | result=${result.classification} | error=${result.fullError ?? 'none'}`
+            );
+            assert.ok(
+              ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+              `Clasificación inesperada: ${result.classification}`
+            );
+          });
+        }
+      }
+    }
+  });
+
 });
