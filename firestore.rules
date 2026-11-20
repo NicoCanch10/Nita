@@ -111,20 +111,24 @@ service cloud.firestore {
     // 4. Validadores estructurales de listas y documentos financieros
     function isValidCategoryMap(cat) {
       let k = cat.keys();
+      let id = cat.id;
+      let label = cat.label;
+      let color = cat.color;
       return (
-          k.size() == 3
-          || (
-            k.hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
-            && (!('isCustom' in cat) || cat.isCustom == null || cat.isCustom is bool)
-            && (!('badgeBg' in cat) || cat.badgeBg == null || (cat.badgeBg is string && cat.badgeBg.size() <= 64))
-            && (!('badgeText' in cat) || cat.badgeText == null || (cat.badgeText is string && cat.badgeText.size() <= 64))
+          (
+            k.size() == 3
+            || (
+              k.hasOnly(['id', 'label', 'color', 'isCustom', 'badgeBg', 'badgeText'])
+              && (!('isCustom' in cat) || cat.isCustom == null || cat.isCustom is bool)
+              && (!('badgeBg' in cat) || cat.badgeBg == null || (cat.badgeBg is string && cat.badgeBg.size() <= 64))
+              && (!('badgeText' in cat) || cat.badgeText == null || (cat.badgeText is string && cat.badgeText.size() <= 64))
+            )
           )
         )
-        && cat.id is string && cat.id.size() > 0 && cat.id.size() <= 64
-        && cat.label is string && cat.label.size() <= 100
-        && cat.color is string && cat.color.size() <= 32;
+        && id is string && id.size() > 0 && id.size() <= 64
+        && label is string && label.size() <= 100
+        && color is string && color.size() <= 32;
     }
-
     function isValidCategoryItem(cat) {
       return cat is map && isValidCategoryMap(cat);
     }
