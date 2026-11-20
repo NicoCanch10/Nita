@@ -1471,4 +1471,48 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
       }
     }
   });
+
+  describe('B-2.2H — Umbral fino de cardinalidad para validadores de gastos fijos y variables', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    const countsToTest = [0, 1, 2, 3, 4, 5, 6] as const;
+    const operations: WriteOperationKind[] = ['create', 'update'];
+
+    for (const target of ['fixedExpenses', 'variableExpenses'] as const) {
+      for (const count of countsToTest) {
+        for (const acc of accounts) {
+          for (const operation of operations) {
+            const uid = `${acc.prefix}_b22h_${target}_n${count}_${operation}`;
+            test(`40. Umbral fino ${target}=${count}, categorías=0, otra lista=0 | ${acc.accountType} | ${operation}`, async (t) => {
+              if (!isEmulatorAvailable || !testEnv) {
+                t.skip('Emulador de Firestore no disponible en este entorno');
+                return;
+              }
+
+              const payload = buildDiagnosticMonthPayload(uid, '2026-11', 2026, 10, {
+                categories: 0,
+                fixedExpenses: target === 'fixedExpenses' ? count : 0,
+                variableExpenses: target === 'variableExpenses' ? count : 0,
+              });
+
+              const result = await executeDiagnosticMonthWrite(
+                testEnv, acc.accountType, uid, operation, '2026-11', 2026, 10, payload
+              );
+
+              console.log(
+                `[B-2.2H] target=${target} | count=${count} | account=${acc.accountType} | operation=${operation} | result=${result.classification} | error=${result.fullError ?? 'none'}`
+              );
+              assert.ok(
+                ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+                `Clasificación inesperada: ${result.classification}`
+              );
+            });
+          }
+        }
+      }
+    }
+  });
+
 });
