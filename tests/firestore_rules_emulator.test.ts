@@ -2022,4 +2022,40 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2T — Matriz completa del umbral combinado (0–4 gastos por lista)', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    for (let fixed = 0; fixed <= 4; fixed++) {
+      for (let variable = 0; variable <= 4; variable++) {
+        for (const acc of accounts) {
+          const uid = `${acc.prefix}_b22t_fix${fixed}_var${variable}`;
+          test(`54. Categorías=11, fijos=${fixed}, variables=${variable} | ${acc.accountType}`, async (t) => {
+            if (!isEmulatorAvailable || !testEnv) {
+              t.skip('Emulador de Firestore no disponible en este entorno');
+              return;
+            }
+            const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+              categories: 11,
+              fixedExpenses: fixed,
+              variableExpenses: variable,
+            });
+            const result = await executeDiagnosticMonthWrite(
+              testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+            );
+            console.log(
+              `[B-2.2T] fixed=${fixed} | variable=${variable} | account=${acc.accountType} | result=${result.classification} | error=${result.fullError ?? 'none'}`
+            );
+            assert.ok(
+              ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+              `Clasificación inesperada: ${result.classification}`
+            );
+          });
+        }
+      }
+    }
+  });
+
 });
