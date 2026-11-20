@@ -1668,4 +1668,47 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2K — Combinaciones de campos opcionales con seis gastos variables sin description', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    const fields = ['jarAdjustments', 'lastJarAdjustmentLog', 'updatedAt'] as const;
+    const combinations = Array.from({ length: 8 }, (_, mask) => ({
+      mask,
+      omitted: fields.filter((_, index) => (mask & (1 << index)) !== 0),
+    }));
+
+    for (const scenario of combinations) {
+      for (const acc of accounts) {
+        const label = scenario.omitted.length ? scenario.omitted.join('+') : 'ninguno';
+        const uid = `${acc.prefix}_b22k_optional_mask_${scenario.mask}`;
+        test(`44. Seis variables sin description; opcionales omitidos=${label} | ${acc.accountType}`, async (t) => {
+          if (!isEmulatorAvailable || !testEnv) {
+            t.skip('Emulador de Firestore no disponible en este entorno');
+            return;
+          }
+          const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+            categories: 0, fixedExpenses: 0, variableExpenses: 6,
+          });
+          const raw = payload as unknown as Record<string, unknown>;
+          for (const field of scenario.omitted) delete raw[field];
+          for (const expense of payload.variableExpenses) delete expense.description;
+
+          const result = await executeDiagnosticMonthWrite(
+            testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+          );
+          console.log(
+            `[B-2.2K] omitted=${label} | account=${acc.accountType} | result=${result.classification} | error=${result.fullError ?? 'none'}`
+          );
+          assert.ok(
+            ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+            `Clasificación inesperada: ${result.classification}`
+          );
+        });
+      }
+    }
+  });
+
 });
