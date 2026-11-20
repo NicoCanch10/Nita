@@ -46,7 +46,6 @@ service cloud.firestore {
 
     function hasValidUserSecurityDoc(userId, tokenEpoch, sec) {
       return sec.get('uid', '') == userId
-        && ('minSessionEpoch' in sec)
         && sec.minSessionEpoch is int
         && sec.minSessionEpoch >= 1
         && tokenEpoch >= sec.minSessionEpoch;
@@ -54,10 +53,7 @@ service cloud.firestore {
 
     function hasValidNitaSecurityEpoch(userId, tok) {
       return userId.size() >= 5
-        && ('sessionEpoch' in tok)
         && tok.sessionEpoch is int
-        && tok.sessionEpoch >= 1
-        && exists(/databases/$(database)/documents/userSecurity/$(userId))
         && hasValidUserSecurityDoc(
           userId,
           tok.sessionEpoch,
