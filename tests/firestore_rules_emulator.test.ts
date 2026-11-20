@@ -1751,4 +1751,44 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     }
   });
 
+
+  describe('B-2.2M — Umbral de cantidad de descriptions con campos opcionales del mes omitidos', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    for (const descriptionCount of Array.from({ length: 7 }, (_, index) => index)) {
+      for (const acc of accounts) {
+        const uid = `${acc.prefix}_b22m_description_count_${descriptionCount}`;
+        test(`46. Seis variables con ${descriptionCount} descriptions presentes y opcionales omitidos | ${acc.accountType}`, async (t) => {
+          if (!isEmulatorAvailable || !testEnv) {
+            t.skip('Emulador de Firestore no disponible en este entorno');
+            return;
+          }
+          const payload = buildDiagnosticMonthPayload(uid, '2026-12', 2026, 11, {
+            categories: 0, fixedExpenses: 0, variableExpenses: 6,
+          });
+          const raw = payload as unknown as Record<string, unknown>;
+          delete raw.jarAdjustments;
+          delete raw.lastJarAdjustmentLog;
+          delete raw.updatedAt;
+          for (let i = descriptionCount; i < payload.variableExpenses.length; i++) {
+            delete payload.variableExpenses[i].description;
+          }
+
+          const result = await executeDiagnosticMonthWrite(
+            testEnv, acc.accountType, uid, 'create', '2026-12', 2026, 11, payload
+          );
+          console.log(
+            `[B-2.2M] descriptions=${descriptionCount} | account=${acc.accountType} | result=${result.classification} | error=${result.fullError ?? 'none'}`
+          );
+          assert.ok(
+            ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(result.classification),
+            `Clasificación inesperada: ${result.classification}`
+          );
+        });
+      }
+    }
+  });
+
 });
