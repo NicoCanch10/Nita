@@ -767,4 +767,550 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
     await assertFails(getDocs(collection(db, 'test')));
     await assertFails(setDoc(doc(db, 'test', 'connection'), { ok: true }));
   });
+
+  // =========================================================================
+  // ETAPA B-2.2D — Ampliación de cobertura de Firestore Rules (SOLO TESTS)
+  // =========================================================================
+
+  type AccountKind = 'google' | 'usr_';
+  type WriteOperationKind = 'create' | 'update';
+  type DiagnosticListTarget = 'categories' | 'fixedExpenses' | 'variableExpenses';
+  type RuleOutcomeClassification =
+    | 'ALLOWED'
+    | 'CEL_EXPRESSION_LIMIT'
+    | 'SECURITY_VALIDATION_DENIED'
+    | 'OTHER_ERROR';
+
+  interface DiagnosticWriteResult {
+    operation: WriteOperationKind;
+    uid: string;
+    accountType: AccountKind;
+    counts: {
+      categories: number;
+      fixedExpenses: number;
+      variableExpenses: number;
+    };
+    allowed: boolean;
+    classification: RuleOutcomeClassification;
+    fullError: string | null;
+  }
+
+  const DEFAULT_CATEGORIES_11 = [
+    { id: 'housing', label: 'Vivienda y Alquiler', color: '#4f46e5' },
+    { id: 'services', label: 'Servicios', color: '#0284c7' },
+    { id: 'debt', label: 'Tarjetas y Deudas', color: '#e11d48' },
+    { id: 'food', label: 'Alimentación y Supermercado', color: '#16a34a' },
+    { id: 'transport', label: 'Transporte y Combustible', color: '#d97706' },
+    { id: 'health', label: 'Salud y Farmacia', color: '#0d9488' },
+    { id: 'subscriptions', label: 'Suscripciones y Conectividad', color: '#7c3aed' },
+    { id: 'leisure', label: 'Ocio, Salidas y Gustos', color: '#db2777' },
+    { id: 'education', label: 'Educación y Cursos', color: '#2563eb' },
+    { id: 'savings', label: 'Ahorro e Inversión', color: '#059669' },
+    { id: 'other', label: 'Otros Gastos', color: '#64748b' },
+  ];
+
+  function buildDiagnosticCategories(count: number): Array<Record<string, unknown>> {
+    const result: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < count; i++) {
+      if (i < DEFAULT_CATEGORIES_11.length) {
+        result.push({ ...DEFAULT_CATEGORIES_11[i] });
+      } else {
+        result.push({
+          id: `cat_extra_${i}`,
+          label: `Categoría Extra ${i + 1}`,
+          color: '#64748b',
+        });
+      }
+    }
+    return result;
+  }
+
+  function buildDiagnosticFixedExpenses(count: number): Array<Record<string, unknown>> {
+    const result: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < count; i++) {
+      result.push({
+        id: `f_diag_${i}`,
+        name: `Gasto Fijo ${i + 1}`,
+        amount: 1000 + i,
+        category: 'housing',
+        isPaid: i % 2 === 0,
+      });
+    }
+    return result;
+  }
+
+  function buildDiagnosticVariableExpenses(count: number): Array<Record<string, unknown>> {
+    const result: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < count; i++) {
+      const day = String((i % 28) + 1).padStart(2, '0');
+      result.push({
+        id: `v_diag_${i}`,
+        date: `2026-10-${day}`,
+        description: `Gasto Variable ${i + 1}`,
+        amount: 500 + i,
+        category: 'food',
+      });
+    }
+    return result;
+  }
+
+  function buildDiagnosticMonthPayload(
+    userId: string,
+    monthKey: string,
+    year: number,
+    month: number,
+    counts: { categories: number; fixedExpenses: number; variableExpenses: number }
+  ) {
+    return {
+      userId,
+      monthKey,
+      year,
+      month,
+      income: 500000,
+      savingsRate: 15,
+      extraDaysPosition: 'end',
+      categories: buildDiagnosticCategories(counts.categories),
+      fixedExpenses: buildDiagnosticFixedExpenses(counts.fixedExpenses),
+      variableExpenses: buildDiagnosticVariableExpenses(counts.variableExpenses),
+      jarAdjustments: {},
+      lastJarAdjustmentLog: null,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function classifyRuleError(err: unknown): {
+    classification: RuleOutcomeClassification;
+    fullError: string;
+  } {
+    const code = (err as { code?: string })?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    const fullError = code ? `[${code}] ${message}` : message;
+
+    if (/maximum of 1000 expressions|Unable to evaluate the expression/i.test(fullError)) {
+      return { classification: 'CEL_EXPRESSION_LIMIT', fullError };
+    }
+    if (
+      code === 'permission-denied' ||
+      /PERMISSION_DENIED|false for '(create|update|get|list|delete)'/i.test(fullError)
+    ) {
+      return { classification: 'SECURITY_VALIDATION_DENIED', fullError };
+    }
+    return { classification: 'OTHER_ERROR', fullError };
+  }
+
+  async function setupAuthenticatedMonthContext(
+    env: RulesTestEnvironment,
+    accountType: AccountKind,
+    uid: string
+  ) {
+    if (accountType === 'usr_') {
+      await env.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), 'userSecurity', uid), {
+          uid,
+          usernameLower: uid.replace(/^usr_/, ''),
+          minSessionEpoch: 1,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        });
+      });
+      return env.authenticatedContext(uid, { provider: 'nita_password', sessionEpoch: 1 }).firestore();
+    }
+    return env.authenticatedContext(uid).firestore();
+  }
+
+  async function seedBaselineMonthForUpdate(
+    env: RulesTestEnvironment,
+    uid: string,
+    monthKey: string,
+    year: number,
+    month: number
+  ) {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users', uid, 'months', monthKey), {
+        userId: uid,
+        monthKey,
+        year,
+        month,
+        income: 100000,
+        savingsRate: 10,
+        extraDaysPosition: 'end',
+        categories: [],
+        fixedExpenses: [],
+        variableExpenses: [],
+        jarAdjustments: {},
+        lastJarAdjustmentLog: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      });
+    });
+  }
+
+  async function assertMonthDocAbsentBeforeCreate(
+    env: RulesTestEnvironment,
+    uid: string,
+    monthKey: string
+  ) {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const preSnap = await getDoc(doc(ctx.firestore(), 'users', uid, 'months', monthKey));
+      assert.equal(
+        preSnap.exists(),
+        false,
+        `[Aislamiento CREATE] El documento /users/${uid}/months/${monthKey} no debe existir antes de setDoc()`
+      );
+    });
+  }
+
+  async function executeDiagnosticMonthWrite(
+    env: RulesTestEnvironment,
+    accountType: AccountKind,
+    uid: string,
+    operation: WriteOperationKind,
+    monthKey: string,
+    year: number,
+    month: number,
+    payload: ReturnType<typeof buildDiagnosticMonthPayload>
+  ): Promise<DiagnosticWriteResult> {
+    const db = await setupAuthenticatedMonthContext(env, accountType, uid);
+    const monthRef = doc(db, 'users', uid, 'months', monthKey);
+
+    if (operation === 'create') {
+      await assertMonthDocAbsentBeforeCreate(env, uid, monthKey);
+    } else {
+      await seedBaselineMonthForUpdate(env, uid, monthKey, year, month);
+      await env.withSecurityRulesDisabled(async (ctx) => {
+        const seededSnap = await getDoc(doc(ctx.firestore(), 'users', uid, 'months', monthKey));
+        assert.equal(
+          seededSnap.exists(),
+          true,
+          `[Preparación UPDATE] El documento /users/${uid}/months/${monthKey} debe existir sembrado antes de updateDoc()`
+        );
+      });
+    }
+
+    const counts = {
+      categories: payload.categories.length,
+      fixedExpenses: payload.fixedExpenses.length,
+      variableExpenses: payload.variableExpenses.length,
+    };
+
+    try {
+      if (operation === 'create') {
+        await setDoc(monthRef, payload);
+      } else {
+        await updateDoc(monthRef, {
+          income: payload.income,
+          categories: payload.categories,
+          fixedExpenses: payload.fixedExpenses,
+          variableExpenses: payload.variableExpenses,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      const res: DiagnosticWriteResult = {
+        operation,
+        uid,
+        accountType,
+        counts,
+        allowed: true,
+        classification: 'ALLOWED',
+        fullError: null,
+      };
+      console.log(
+        `[B-2.2D] op=${res.operation} | path=users/${uid}/months/${monthKey} (${res.accountType}) | counts=cat:${counts.categories},fix:${counts.fixedExpenses},var:${counts.variableExpenses} | result=ALLOWED`
+      );
+      return res;
+    } catch (err: unknown) {
+      const { classification, fullError } = classifyRuleError(err);
+      const res: DiagnosticWriteResult = {
+        operation,
+        uid,
+        accountType,
+        counts,
+        allowed: false,
+        classification,
+        fullError,
+      };
+      console.log(
+        `[B-2.2D] op=${res.operation} | path=users/${uid}/months/${monthKey} (${res.accountType}) | counts=cat:${counts.categories},fix:${counts.fixedExpenses},var:${counts.variableExpenses} | result=REJECTED (${classification}) | error=${fullError}`
+      );
+      return res;
+    }
+  }
+
+  function mutateInvalidElementAt(
+    target: DiagnosticListTarget,
+    payload: ReturnType<typeof buildDiagnosticMonthPayload>,
+    badIndex: number
+  ) {
+    if (target === 'categories') {
+      payload.categories[badIndex] = { id: '', label: 'Categoría Inválida', color: '#000000' };
+    } else if (target === 'fixedExpenses') {
+      payload.fixedExpenses[badIndex] = {
+        id: `f_bad_${badIndex}`,
+        name: 'Gasto Fijo Negativo',
+        amount: -100,
+        category: 'housing',
+        isPaid: false,
+      };
+    } else {
+      payload.variableExpenses[badIndex] = {
+        id: `v_bad_${badIndex}`,
+        date: '2026-10-01',
+        description: 'Gasto Variable Negativo',
+        amount: -50,
+        category: 'food',
+      };
+    }
+  }
+
+  describe('B-2.2D (1) — Escrituras mensuales con 11 categorías y gastos fijos/variables (Google y usr_*, create y update)', () => {
+    const scenarios: Array<{
+      tag: string;
+      label: string;
+      categories: number;
+      fixedExpenses: number;
+      variableExpenses: number;
+    }> = [
+      { tag: 'c11_f0_v0', label: '11 categorías, 0 fijos, 0 variables', categories: 11, fixedExpenses: 0, variableExpenses: 0 },
+      { tag: 'c11_f1_v1', label: '11 categorías, 1 fijo, 1 variable', categories: 11, fixedExpenses: 1, variableExpenses: 1 },
+      { tag: 'c11_f5_v5', label: '11 categorías, 5 fijos, 5 variables', categories: 11, fixedExpenses: 5, variableExpenses: 5 },
+      { tag: 'c11_f11_v11', label: '11 categorías, 11 fijos, 11 variables', categories: 11, fixedExpenses: 11, variableExpenses: 11 },
+    ];
+
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+
+    const operations: WriteOperationKind[] = ['create', 'update'];
+
+    for (const scenario of scenarios) {
+      for (const acc of accounts) {
+        for (const op of operations) {
+          const uniqueUid = `${acc.prefix}_diag_b22d_1_${scenario.tag}_${op}`;
+          test(`31. Payload válido [${scenario.label}] | ${acc.accountType} (${uniqueUid}) | ${op}`, async (t) => {
+            if (!isEmulatorAvailable || !testEnv) {
+              t.skip('Emulador de Firestore no disponible en este entorno');
+              return;
+            }
+            const payload = buildDiagnosticMonthPayload(uniqueUid, '2026-10', 2026, 9, {
+              categories: scenario.categories,
+              fixedExpenses: scenario.fixedExpenses,
+              variableExpenses: scenario.variableExpenses,
+            });
+            const res = await executeDiagnosticMonthWrite(
+              testEnv,
+              acc.accountType,
+              uniqueUid,
+              op,
+              '2026-10',
+              2026,
+              9,
+              payload
+            );
+            assert.equal(
+              res.classification,
+              'ALLOWED',
+              `Se esperaba ALLOWED para payload válido (${scenario.label}, ${acc.accountType}, ${op}), pero resultó ${res.classification}: ${res.fullError}`
+            );
+          });
+        }
+      }
+    }
+  });
+
+  describe('B-2.2D (2) — Listas de 12 elementos: cobertura de índices 5, 10 (intermedio) y 11 (cola)', () => {
+    const listTargets: Array<{ target: DiagnosticListTarget; short: string }> = [
+      { target: 'categories', short: 'cat' },
+      { target: 'fixedExpenses', short: 'fix' },
+      { target: 'variableExpenses', short: 'var' },
+    ];
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    const operations: WriteOperationKind[] = ['create', 'update'];
+
+    for (const { target, short } of listTargets) {
+      for (const acc of accounts) {
+        for (const op of operations) {
+          const validUid = `${acc.prefix}_diag_b22d_2_${short}_valid_${op}`;
+          test(`32. Lista ${target} (12 válidos) | ${acc.accountType} (${validUid}) | ${op}`, async (t) => {
+            if (!isEmulatorAvailable || !testEnv) {
+              t.skip('Emulador de Firestore no disponible en este entorno');
+              return;
+            }
+            const counts = {
+              categories: target === 'categories' ? 12 : 0,
+              fixedExpenses: target === 'fixedExpenses' ? 12 : 0,
+              variableExpenses: target === 'variableExpenses' ? 12 : 0,
+            };
+            const payload = buildDiagnosticMonthPayload(validUid, '2026-11', 2026, 10, counts);
+            const res = await executeDiagnosticMonthWrite(
+              testEnv,
+              acc.accountType,
+              validUid,
+              op,
+              '2026-11',
+              2026,
+              10,
+              payload
+            );
+            assert.equal(
+              res.classification,
+              'ALLOWED',
+              `Lista válida de 12 ${target} (${acc.accountType}, ${op}) falló con ${res.classification}: ${res.fullError}`
+            );
+          });
+
+          for (const badIndex of [10, 11, 5] as const) {
+            const invalidUid = `${acc.prefix}_diag_b22d_2_${short}_idx${badIndex}_${op}`;
+            test(`33. Lista ${target} (12 elementos, inválido exclusivamente en índice ${badIndex}) | ${acc.accountType} (${invalidUid}) | ${op}`, async (t) => {
+              if (!isEmulatorAvailable || !testEnv) {
+                t.skip('Emulador de Firestore no disponible en este entorno');
+                return;
+              }
+              const counts = {
+                categories: target === 'categories' ? 12 : 0,
+                fixedExpenses: target === 'fixedExpenses' ? 12 : 0,
+                variableExpenses: target === 'variableExpenses' ? 12 : 0,
+              };
+              const payload = buildDiagnosticMonthPayload(invalidUid, '2026-11', 2026, 10, counts);
+              mutateInvalidElementAt(target, payload, badIndex);
+
+              const res = await executeDiagnosticMonthWrite(
+                testEnv,
+                acc.accountType,
+                invalidUid,
+                op,
+                '2026-11',
+                2026,
+                10,
+                payload
+              );
+
+              if (res.classification === 'CEL_EXPRESSION_LIMIT') {
+                assert.fail(
+                  `[PRUEBA INCONCLUSA POR LÍMITE CEL] ${target}[${badIndex}] (${acc.accountType}, ${op}) fue rechazado por superar 1000 expresiones CEL y NO demuestra validación del elemento inválido: ${res.fullError}`
+                );
+              }
+
+              assert.equal(
+                res.classification,
+                'SECURITY_VALIDATION_DENIED',
+                `[BRECHA DE VALIDACIÓN] ${target}[${badIndex}] (${acc.accountType}, ${op}) obtuvo ${res.classification} en lugar de SECURITY_VALIDATION_DENIED: ${res.fullError}`
+              );
+            });
+          }
+        }
+      }
+    }
+  });
+
+  describe('B-2.2D (3) — Controles de seguridad invariantes en meses y listas', () => {
+    test('34. Rechazo estricto de createdAt: null, updatedAt: null y claves desconocidas en elementos de mes -> DENEGADO', async (t) => {
+      if (!isEmulatorAvailable || !testEnv) {
+        t.skip('Emulador de Firestore no disponible en este entorno');
+        return;
+      }
+      const uid = 'usr_sec_ctrl_b22d1';
+      const db = await setupAuthenticatedMonthContext(testEnv, 'usr_', uid);
+
+      const cases: Array<{ monthKey: string; monthIdx: number; patch: Record<string, unknown> }> = [
+        { monthKey: '2026-01', monthIdx: 0, patch: { createdAt: null } },
+        { monthKey: '2026-02', monthIdx: 1, patch: { updatedAt: null } },
+        {
+          monthKey: '2026-03',
+          monthIdx: 2,
+          patch: { categories: [{ id: 'cat1', label: 'Comida', color: '#10b981', unknownKey: 'x' }] },
+        },
+        {
+          monthKey: '2026-04',
+          monthIdx: 3,
+          patch: { fixedExpenses: [{ id: 'f1', name: 'Alquiler', amount: 1000, category: 'cat1', isPaid: true, extra: 1 }] },
+        },
+        {
+          monthKey: '2026-05',
+          monthIdx: 4,
+          patch: { variableExpenses: [{ id: 'v1', date: '2026-05-01', description: 'Café', amount: 500, category: 'cat1', extra: 1 }] },
+        },
+      ];
+
+      for (const c of cases) {
+        await assertMonthDocAbsentBeforeCreate(testEnv, uid, c.monthKey);
+        const base = buildValidMonthPayload(uid, c.monthKey, 2026, c.monthIdx);
+        const res = classifyRuleError(
+          await setDoc(doc(db, 'users', uid, 'months', c.monthKey), {
+            ...base,
+            ...c.patch,
+          }).catch((e) => e)
+        );
+        assert.equal(res.classification, 'SECURITY_VALIDATION_DENIED', res.fullError);
+      }
+    });
+
+    test('35. Límites máximos de listas (101 categorías, 301 fijos, 1501 variables) e inmutabilidad en update de mes -> DENEGADO', async (t) => {
+      if (!isEmulatorAvailable || !testEnv) {
+        t.skip('Emulador de Firestore no disponible en este entorno');
+        return;
+      }
+      const uid = 'usr_limits_ctrl_b22d1';
+      const db = await setupAuthenticatedMonthContext(testEnv, 'usr_', uid);
+
+      await assertMonthDocAbsentBeforeCreate(testEnv, uid, '2026-06');
+      const overCat = buildDiagnosticMonthPayload(uid, '2026-06', 2026, 5, {
+        categories: 101,
+        fixedExpenses: 0,
+        variableExpenses: 0,
+      });
+      assert.equal(
+        classifyRuleError(await setDoc(doc(db, 'users', uid, 'months', '2026-06'), overCat).catch((e) => e))
+          .classification,
+        'SECURITY_VALIDATION_DENIED'
+      );
+
+      await assertMonthDocAbsentBeforeCreate(testEnv, uid, '2026-07');
+      const overFixed = buildDiagnosticMonthPayload(uid, '2026-07', 2026, 6, {
+        categories: 0,
+        fixedExpenses: 301,
+        variableExpenses: 0,
+      });
+      assert.equal(
+        classifyRuleError(await setDoc(doc(db, 'users', uid, 'months', '2026-07'), overFixed).catch((e) => e))
+          .classification,
+        'SECURITY_VALIDATION_DENIED'
+      );
+
+      await assertMonthDocAbsentBeforeCreate(testEnv, uid, '2026-08');
+      const overVar = buildDiagnosticMonthPayload(uid, '2026-08', 2026, 7, {
+        categories: 0,
+        fixedExpenses: 0,
+        variableExpenses: 1501,
+      });
+      assert.equal(
+        classifyRuleError(await setDoc(doc(db, 'users', uid, 'months', '2026-08'), overVar).catch((e) => e))
+          .classification,
+        'SECURITY_VALIDATION_DENIED'
+      );
+
+      // Inmutabilidad de createdAt, userId y monthKey en update mensual (ruta distinta sembrada previamente)
+      await seedBaselineMonthForUpdate(testEnv, uid, '2026-09', 2026, 8);
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const seededSnap = await getDoc(doc(ctx.firestore(), 'users', uid, 'months', '2026-09'));
+        assert.equal(seededSnap.exists(), true);
+      });
+      for (const patch of [
+        { createdAt: '2027-01-01T00:00:00.000Z' },
+        { userId: 'usr_otro' },
+        { monthKey: '2026-12' },
+      ]) {
+        const res = classifyRuleError(
+          await updateDoc(doc(db, 'users', uid, 'months', '2026-09'), {
+            ...patch,
+            updatedAt: new Date().toISOString(),
+          }).catch((e) => e)
+        );
+        assert.equal(res.classification, 'SECURITY_VALIDATION_DENIED', res.fullError);
+      }
+    });
+  });
 });
