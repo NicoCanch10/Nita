@@ -293,23 +293,23 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
         </div>
       </div>
 
-      {/* Unified Load Action Bar */}
-      <div className="px-4 sm:px-6 py-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between sm:justify-center gap-3">
+      {/* Unified Load Action Bar (Mobile & small screens only; moved into Filter bar on web md+) */}
+      <div className="px-4 sm:px-6 py-3 bg-slate-50/70 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex md:hidden items-center justify-between sm:justify-center gap-3">
         <button
           type="button"
           onClick={handleOpenAddModal}
           data-testid="daily-expenses-add-trigger"
-          className="w-full sm:w-auto sm:min-w-[200px] md:min-w-[220px] min-h-[42px] inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 sm:px-8 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
+          className="w-full sm:w-auto sm:min-w-[200px] min-h-[42px] inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 sm:px-8 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
         >
           <span>CARGAR +</span>
         </button>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="px-4 sm:px-6 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
+      <div className="px-4 sm:px-6 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row lg:grid lg:grid-cols-[1fr_auto_1fr] items-stretch sm:items-center justify-between gap-3 lg:gap-4 text-xs">
         
         {/* Category Filter */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 lg:justify-self-start">
           <span className="text-slate-400 dark:text-slate-500 font-bold shrink-0">{t.filterAll}:</span>
           <select
             value={categoryFilter}
@@ -326,17 +326,28 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
           </select>
         </div>
 
-        {/* Search */}
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder={t.searchDailyPlaceholder}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden focus:bg-white dark:focus:bg-slate-750"
-          />
+        {/* Search: right on sm (<md), centered on web (md+) */}
+        <div className="w-full sm:w-64 md:w-auto md:flex-1 md:flex md:justify-center lg:flex-none lg:justify-self-center">
+          <div className="relative w-full md:max-w-[225px] lg:w-64 lg:max-w-none xl:w-72">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder={t.searchDailyPlaceholder}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 md:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden focus:bg-white dark:focus:bg-slate-750"
+            />
+          </div>
         </div>
+
+        {/* Web-only CARGAR + Button replacing the right search slot */}
+        <button
+          type="button"
+          onClick={handleOpenAddModal}
+          className="hidden md:inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2 px-6 md:min-w-[175px] lg:w-full lg:max-w-[270px] xl:max-w-[320px] rounded-xl transition-all shadow-sm cursor-pointer whitespace-nowrap shrink-0 lg:justify-self-end focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
+        >
+          <span>CARGAR +</span>
+        </button>
 
       </div>
 
