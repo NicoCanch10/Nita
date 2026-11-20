@@ -1313,4 +1313,50 @@ describe('Pruebas reales de Firebase Firestore Rules con @firebase/rules-unit-te
       }
     });
   });
+
+  describe('B-2.2E — Diagnóstico de umbral CEL aislando cardinalidad de categories', () => {
+    const accounts: Array<{ accountType: AccountKind; prefix: string }> = [
+      { accountType: 'google', prefix: 'google' },
+      { accountType: 'usr_', prefix: 'usr' },
+    ];
+    const operations: WriteOperationKind[] = ['create', 'update'];
+
+    for (const categoryCount of Array.from({ length: 13 }, (_, index) => index)) {
+      for (const acc of accounts) {
+        for (const op of operations) {
+          const uniqueUid = `${acc.prefix}_cel_threshold_c${categoryCount}_${op}`;
+          test(`36. Umbral CEL categories=${categoryCount} | ${acc.accountType} | ${op}`, async (t) => {
+            if (!isEmulatorAvailable || !testEnv) {
+              t.skip('Emulador de Firestore no disponible en este entorno');
+              return;
+            }
+
+            const payload = buildDiagnosticMonthPayload(uniqueUid, '2026-12', 2026, 11, {
+              categories: categoryCount,
+              fixedExpenses: 0,
+              variableExpenses: 0,
+            });
+
+            const res = await executeDiagnosticMonthWrite(
+              testEnv,
+              acc.accountType,
+              uniqueUid,
+              op,
+              '2026-12',
+              2026,
+              11,
+              payload
+            );
+
+            // Diagnóstico observacional: ALLOWED, CEL_EXPRESSION_LIMIT o
+            // SECURITY_VALIDATION_DENIED se registran sin ocultar el resultado.
+            assert.ok(
+              ['ALLOWED', 'CEL_EXPRESSION_LIMIT', 'SECURITY_VALIDATION_DENIED', 'OTHER_ERROR'].includes(res.classification),
+              `Clasificación diagnóstica inesperada: ${res.classification}`
+            );
+          });
+        }
+      }
+    }
+  });
 });
