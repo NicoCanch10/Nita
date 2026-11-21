@@ -81,7 +81,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
       <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] transition-colors">
         
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 bg-slate-50/70 dark:bg-slate-850">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-white dark:bg-slate-900">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 rounded-xl shrink-0">
               <Palette className="w-5 h-5" />
@@ -107,7 +107,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1">
+        <div className="p-4 sm:p-5 overflow-y-auto no-scrollbar space-y-5 flex-1">
           
           {/* Create New Category Form */}
           <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 rounded-2xl space-y-3">
@@ -174,7 +174,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
               </span>
             </div>
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden max-h-64 sm:max-h-72 overflow-y-auto">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden max-h-64 sm:max-h-72 overflow-y-auto no-scrollbar">
               {categories.map((cat) => {
                 const isEditing = editingId === cat.id;
                 const catInfo = getCategoryInfo(cat.id, categories, language);
@@ -269,7 +269,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-850 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end">
+        <div className="p-3.5 sm:p-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}

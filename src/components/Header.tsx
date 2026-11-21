@@ -84,9 +84,13 @@ export const Header: React.FC<HeaderProps> = ({
   onManualSync,
   isSyncingManual = false,
 }) => {
-  const { isGuestMode, exitGuestMode } = useAuth();
+  const { user, isGuestMode, exitGuestMode } = useAuth();
   const t = getTranslations(language || 'es');
   const monthNames = t.months || MONTH_NAMES_ES;
+  const rawDisplayName = user?.displayName?.trim() || '';
+  const firstName = rawDisplayName ? rawDisplayName.split(/\s+/)[0] : '';
+  const userName = firstName || user?.email?.split('@')[0]?.trim() || '';
+  const headerGreeting = !isGuestMode && userName ? `¡Hola, ${userName}!` : t.appTitle;
 
   const handlePrevMonth = () => {
     if (month === 0) {
@@ -146,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="min-w-0">
               <span className="text-sm sm:text-base lg:text-lg font-black tracking-tight text-slate-900 dark:text-white block leading-tight truncate">
-                {t.appTitle}
+                {headerGreeting}
               </span>
             </div>
           </div>

@@ -191,17 +191,21 @@ function MainApp() {
     const rafId = window.requestAnimationFrame(() => {
       const headerHeight = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const desktopTabsEl = desktopTabsRef.current;
-      const isDesktopTabsVisible = Boolean(
-        desktopTabsEl && desktopTabsEl.getBoundingClientRect().height > 0
-      );
-      const anchorEl = isDesktopTabsVisible ? desktopTabsEl : sectionStartRef.current;
+      const desktopTabsHeight = desktopTabsEl?.getBoundingClientRect().height ?? 0;
+      const isDesktopTabsVisible = Boolean(desktopTabsEl && desktopTabsHeight > 0);
+      const anchorEl = sectionStartRef.current;
 
-      const targetTop = anchorEl
+      const stickyTopOffset = isDesktopTabsVisible
+        ? headerHeight + 8 + desktopTabsHeight + 24
+        : headerHeight + 24;
+
+      const rawTargetTop = anchorEl
         ? Math.max(
             0,
-            Math.round(anchorEl.getBoundingClientRect().top + window.scrollY - headerHeight - 24)
+            Math.round(anchorEl.getBoundingClientRect().top + window.scrollY - stickyTopOffset)
           )
         : 0;
+      const targetTop = isDesktopTabsVisible && rawTargetTop <= 24 ? 0 : rawTargetTop;
 
       const prefersReducedMotion =
         typeof window.matchMedia === 'function' &&
@@ -229,6 +233,28 @@ function MainApp() {
     !isOnline || isOfflineSession ? 'offline' : 'idle'
   );
   const [isSyncingManual, setIsSyncingManual] = useState(false);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState<number>(0);
+
+  useEffect(() => {
+    const headerEl = stickyHeaderRef.current;
+    if (!headerEl) return;
+
+    const updateHeight = () => {
+      const nextHeight = Math.round(headerEl.getBoundingClientRect().height);
+      setStickyHeaderHeight(prev => (prev !== nextHeight ? nextHeight : prev));
+    };
+
+    updateHeight();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateHeight);
+      observer.observe(headerEl);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateHeight);
+    return () => window.removeEventListener('resize', updateHeight);
+  }, [isGuestMode, isCloudSyncReady]);
 
   // Synchronous mutable references to avoid stale closure state across async operations
   const monthsDataRef = useRef(monthsData);
@@ -1787,8 +1813,12 @@ function MainApp() {
         
 
 
-        {/* Desktop Navigation Tabs Bar (Visible únicamente en pantallas medianas y de escritorio: sm en adelante) */}
-        <div ref={desktopTabsRef} className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-1.5 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-xs transition-colors">
+        {/* Desktop Navigation Tabs Bar (Visible únicamente en pantallas medianas y de escritorio: sm en adelante, fija al desplazarse) */}
+        <div
+          ref={desktopTabsRef}
+          style={{ top: `${stickyHeaderHeight + 8}px` }}
+          className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 sm:sticky z-20 gap-1.5 p-1.5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm transition-colors"
+        >
           <button
             type="button"
             onClick={() => handleSelectTab('all')}

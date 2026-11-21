@@ -265,7 +265,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             </button>
           </div>
 
-          <div className="p-4 space-y-4 text-xs max-h-[78vh] overflow-y-auto pb-12">
+          <div className="p-4 space-y-4 text-xs max-h-[78vh] overflow-y-auto no-scrollbar pb-12">
             
             {/* 1. Modo Oscuro vs Modo Blanco (Luna y Sol) */}
             <div className="space-y-2">
@@ -353,7 +353,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               {/* Dropdown menu displaying each country flag and language */}
               {isLangDropdownOpen && (
                 <div 
-                  className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-150"
+                  className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto no-scrollbar bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-1 space-y-0.5 animate-in fade-in zoom-in-95 duration-150"
                   role="listbox"
                 >
                   {sortedLanguages.map((lang) => {

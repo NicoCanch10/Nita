@@ -181,7 +181,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
           )}
 
           {/* Notifications List */}
-          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+          <div className="max-h-80 overflow-y-auto no-scrollbar divide-y divide-slate-100 dark:divide-slate-800">
             {notifications.length === 0 ? (
               <div className="py-8 text-center px-4">
                 <CheckCircle className="w-7 h-7 text-emerald-500 mx-auto mb-1.5" />
