@@ -136,42 +136,42 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           
           {/* Brand & Wordmark */}
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white shadow-xs shrink-0 flex items-center justify-center p-0.5">
+          <div className="contents sm:flex sm:items-center sm:gap-3 sm:min-w-0">
+            <div className="row-span-2 w-[60px] h-[60px] sm:row-span-1 sm:w-11 sm:h-11 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white shadow-xs shrink-0 flex items-center justify-center p-0.5">
               <img 
                 src="/nita-logo.jpg" 
                 alt="Logo NITA" 
                 className="w-full h-full object-cover rounded-xl"
               />
             </div>
-            <div className="min-w-0">
-              <span className="text-sm sm:text-base lg:text-lg font-black tracking-tight text-slate-900 dark:text-white block leading-tight truncate">
+            <div className="col-start-2 row-start-1 min-w-0">
+              <span className="text-sm sm:text-base lg:text-lg font-extrabold text-slate-900 dark:text-white block leading-snug py-0.5 truncate">
                 {headerGreeting}
               </span>
             </div>
           </div>
 
           {/* Month / Year & Action Controls */}
-          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 flex-wrap sm:flex-nowrap">
+          <div className="col-start-2 row-start-2 sm:col-auto sm:row-auto flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 min-w-0 sm:shrink-0 flex-wrap sm:flex-nowrap">
             {/* Month & Year Stepper */}
-            <div className="inline-flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 text-slate-700 dark:text-slate-300">
+            <div className="inline-flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-0.5 sm:p-1 text-slate-700 dark:text-slate-300 max-w-full">
               <button
                 type="button"
                 onClick={handlePrevMonth}
                 title={t.previousMonth}
-                className="p-1 sm:p-1.5 hover:bg-white dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors text-slate-500 dark:text-slate-400 cursor-pointer"
+                className="p-1 sm:p-1.5 hover:bg-white dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors text-slate-500 dark:text-slate-400 cursor-pointer shrink-0"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
 
               <select
                 value={month}
                 onChange={(e) => onMonthChange(Number(e.target.value))}
-                className="bg-transparent font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm px-1.5 sm:px-2 py-0.5 sm:py-1 outline-hidden cursor-pointer"
+                className="bg-transparent font-bold text-slate-800 dark:text-slate-200 text-[11px] sm:text-sm px-1 sm:px-2 py-0.5 sm:py-1 outline-hidden cursor-pointer min-w-0"
               >
                 {monthNames.map((name, idx) => (
                   <option key={idx} value={idx} className="dark:bg-slate-800 dark:text-white">
@@ -183,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
               <select
                 value={year}
                 onChange={(e) => onYearChange(Number(e.target.value))}
-                className="bg-transparent font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm px-1 sm:px-1.5 py-0.5 sm:py-1 outline-hidden cursor-pointer"
+                className="bg-transparent font-bold text-slate-800 dark:text-slate-200 text-[11px] sm:text-sm px-0.5 sm:px-1.5 py-0.5 sm:py-1 outline-hidden cursor-pointer shrink-0"
               >
                 {years.map((y) => (
                   <option key={y} value={y} className="dark:bg-slate-800 dark:text-white">
@@ -196,9 +196,9 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={handleNextMonth}
                 title={t.nextMonth}
-                className="p-1 sm:p-1.5 hover:bg-white dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors text-slate-500 dark:text-slate-400 cursor-pointer"
+                className="p-1 sm:p-1.5 hover:bg-white dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors text-slate-500 dark:text-slate-400 cursor-pointer shrink-0"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
 

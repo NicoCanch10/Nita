@@ -257,11 +257,11 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
             </div>
           </div>
 
-          <div className="text-center self-start sm:self-auto bg-emerald-50/70 dark:bg-emerald-950/30 px-3.5 py-2 rounded-2xl border border-emerald-100 dark:border-emerald-900/50 min-w-[110px]">
-            <span className="text-3xs text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold block text-center">
+          <div className="w-full sm:w-auto sm:grow text-center bg-emerald-50/70 dark:bg-emerald-950/30 px-4 py-2.5 rounded-2xl border border-emerald-100 dark:border-emerald-900/50 min-w-[110px] flex flex-col items-center justify-center">
+            <span className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold block text-center">
               {t.savingsAmountLabel}
             </span>
-            <span className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300 tabular-nums block text-center">
+            <span className="text-lg sm:text-xl font-black text-emerald-700 dark:text-emerald-300 tabular-nums block text-center mt-0.5">
               {formatCurrency(income > 0 ? (income * localSavingsRate) / 100 : 0, currency)}
             </span>
           </div>
