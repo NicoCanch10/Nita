@@ -1214,6 +1214,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const tabButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
 
   // Cada vez que se vuelve a abrir la guía, inicia en el paso 1 (índice 0)
   useEffect(() => {
@@ -1244,9 +1245,12 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     }
   }, [isOpen, activeStepIndex]);
 
-  // Mantener visible en móvil la pestaña activa al navegar con flechas, botones o swipe
+  // Mantener visible en móvil la pestaña activa y ubicar siempre el contenido al inicio al cambiar de paso
   useEffect(() => {
     if (!isOpen) return;
+    if (contentScrollRef.current) {
+      contentScrollRef.current.scrollTop = 0;
+    }
     const activeTabEl = tabButtonRefs.current[activeStepIndex];
     if (activeTabEl && typeof activeTabEl.scrollIntoView === 'function') {
       activeTabEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
@@ -1494,6 +1498,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
         {/* Contenido principal con barra de scroll oculta y deslizamiento táctil */}
         <div
+          ref={contentScrollRef}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
           className="p-4 sm:p-6 overflow-y-auto no-scrollbar space-y-4 sm:space-y-5 flex-1 touch-pan-y bg-white dark:bg-[#020617]"
