@@ -51,11 +51,11 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   // 1º Tomar Ingreso Neto Mensual
   // 2º Descontar el % indicado en Ahorro
   const totalSavings = (income * savingsRate) / 100;
-  const savingsPct = savingsRate;
+  const savingsPct = Math.round(savingsRate * 100) / 100;
 
   // 3º Distribuir entre Gastos Fijos y Gastos Variables
   const fixedPct = income > 0 ? Math.round((totalFixed / income) * 100) : 0;
-  const variablePct = income > 0 ? Math.max(0, 100 - savingsPct - fixedPct) : 0;
+  const variablePct = income > 0 ? Math.round(Math.max(0, 100 - savingsPct - fixedPct) * 100) / 100 : 0;
 
   // Category breakdown
   const categoryTotals: Record<string, number> = {};

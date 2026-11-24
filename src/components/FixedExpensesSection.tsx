@@ -12,6 +12,7 @@ import {
 export { parseAmountInput } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
 import { CategoryManagerModal } from './CategoryManagerModal';
+import { MonthCalendarInput } from './MonthCalendarInput';
 import { 
   Plus, 
   Trash2, 
@@ -40,6 +41,8 @@ interface FixedExpensesSectionProps {
   onUpdateCategoryLabel?: (id: string, label: string) => void;
   onDeleteCategory: (id: string) => void;
   language?: string;
+  month?: number;
+  year?: number;
   daysInMonth?: number;
   initialAddModalOpen?: boolean;
 }
@@ -58,10 +61,16 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   onUpdateCategoryLabel,
   onDeleteCategory,
   language = 'es',
+  month,
+  year,
   daysInMonth = 31,
   initialAddModalOpen = false,
 }) => {
   const t = getTranslations(language);
+  const now = new Date();
+  const activeMonth = month !== undefined && month !== null ? month : now.getMonth();
+  const activeYear = year !== undefined && year !== null ? year : now.getFullYear();
+
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<string>(() => categories[0]?.id || 'housing');
@@ -88,6 +97,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   useEffect(() => {
     if (!editingExpenseId && !isAddModalOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') {
         if (editingExpenseId) {
           setEditingExpenseId(null);
@@ -144,7 +154,13 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
     setEditName(expense.name || '');
     setEditAmount(expense.amount ? formatAmountForInput(expense.amount) : '');
     setEditCategory(expense.category || categories[0]?.id || 'housing');
-    setEditDueDate(expense.dueDate ? String(expense.dueDate) : '');
+    if (expense.dueDate) {
+      const clampedDay = Math.min(daysInMonth, Math.max(1, Number(expense.dueDate)));
+      const monthPrefix = `${activeYear}-${String(activeMonth + 1).padStart(2, '0')}`;
+      setEditDueDate(`${monthPrefix}-${String(clampedDay).padStart(2, '0')}`);
+    } else {
+      setEditDueDate('');
+    }
   };
 
   const handleSaveEditExpense = (id: string) => {
@@ -152,7 +168,15 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
     if (!finalName) return;
     const numAmount = parseAmountInput(editAmount);
     if (!numAmount || numAmount <= 0) return;
-    const numDueDate = editDueDate.trim() ? Math.min(daysInMonth, Math.max(1, parseInt(editDueDate, 10))) : undefined;
+    const trimmedDue = editDueDate.trim();
+    let numDueDate: number | undefined;
+    if (trimmedDue) {
+      const isoMatch = /^\d{4}-\d{2}-(\d{2})$/.exec(trimmedDue);
+      const parsedDay = isoMatch ? parseInt(isoMatch[1], 10) : parseInt(trimmedDue, 10);
+      if (!isNaN(parsedDay)) {
+        numDueDate = Math.min(daysInMonth, Math.max(1, parsedDay));
+      }
+    }
     onUpdateExpense(id, {
       name: finalName,
       amount: numAmount,
@@ -177,7 +201,15 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
     if (!finalName || !numAmount || numAmount <= 0) return;
 
     const finalCategory = category || categories[0]?.id || 'housing';
-    const numDueDate = dueDate.trim() ? Math.min(daysInMonth, Math.max(1, parseInt(dueDate, 10))) : undefined;
+    const trimmedDue = dueDate.trim();
+    let numDueDate: number | undefined;
+    if (trimmedDue) {
+      const isoMatch = /^\d{4}-\d{2}-(\d{2})$/.exec(trimmedDue);
+      const parsedDay = isoMatch ? parseInt(isoMatch[1], 10) : parseInt(trimmedDue, 10);
+      if (!isNaN(parsedDay)) {
+        numDueDate = Math.min(daysInMonth, Math.max(1, parsedDay));
+      }
+    }
 
     onAddExpense({
       name: finalName,
@@ -516,7 +548,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
               </div>
 
               {/* Monto */}
-              <div className="sm:col-span-5">
+              <div className="sm:col-span-4">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                   Importe ({currency})
                 </label>
@@ -564,33 +596,21 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 </div>
               </div>
 
-              {/* Vencimiento */}
-              <div className="sm:col-span-3">
+              {/* Fecha de vencimiento (solo calendario del mes en curso e idioma seleccionado en NITA) */}
+              <div className="sm:col-span-4 relative">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Vto (1-{daysInMonth})
+                  {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  max={daysInMonth}
-                  aria-label={`${t.dueDayShort} (opcional)`}
-                  title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (opcional)`}
+                <MonthCalendarInput
                   value={dueDate}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '') {
-                      setDueDate('');
-                      return;
-                    }
-                    const num = parseInt(val, 10);
-                    if (!isNaN(num)) {
-                      if (num > daysInMonth) setDueDate(String(daysInMonth));
-                      else if (num < 1) setDueDate('1');
-                      else setDueDate(val);
-                    }
-                  }}
-                  placeholder="Opcional"
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2.5 text-sm font-bold text-center tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500"
+                  onChange={setDueDate}
+                  month={activeMonth}
+                  year={activeYear}
+                  daysInMonth={daysInMonth}
+                  language={language}
+                  ariaLabel={`${t.dueDayShort} (opcional)`}
+                  title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (opcional)`}
+                  accentColor="blue"
                 />
               </div>
             </div>
@@ -687,7 +707,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 </div>
 
                 {/* Monto */}
-                <div className="sm:col-span-5">
+                <div className="sm:col-span-4">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                     Importe ({currency})
                   </label>
@@ -725,31 +745,21 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                   </select>
                 </div>
 
-                {/* Vencimiento */}
-                <div className="sm:col-span-3">
+                {/* Fecha de vencimiento (solo calendario del mes en curso e idioma seleccionado en NITA) */}
+                <div className="sm:col-span-4 relative">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Vto (1-{daysInMonth})
+                    {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
                   </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max={daysInMonth}
+                  <MonthCalendarInput
                     value={editDueDate}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === '') {
-                        setEditDueDate('');
-                        return;
-                      }
-                      const num = parseInt(val, 10);
-                      if (!isNaN(num)) {
-                        if (num > daysInMonth) setEditDueDate(String(daysInMonth));
-                        else if (num < 1) setEditDueDate('1');
-                        else setEditDueDate(val);
-                      }
-                    }}
-                    placeholder="Opcional"
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2.5 text-sm font-bold text-center tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
+                    onChange={setEditDueDate}
+                    month={activeMonth}
+                    year={activeYear}
+                    daysInMonth={daysInMonth}
+                    language={language}
+                    ariaLabel={`${t.dueDayShort} (opcional)`}
+                    title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (opcional)`}
+                    accentColor="blue"
                   />
                 </div>
               </div>

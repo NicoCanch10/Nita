@@ -185,7 +185,7 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
             </div>
           )}
 
-          <div className="bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900 px-3.5 py-1.5 rounded-xl text-xs font-black text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 shrink-0 self-start sm:self-auto">
+          <div className="bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900 px-3.5 py-1.5 rounded-xl text-xs font-black text-indigo-700 dark:text-indigo-300 flex items-center justify-center sm:justify-start gap-1.5 w-full sm:w-auto shrink-0">
             <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
             <span>{t.variableExpenses}: {formatCurrency(monthlyRemaining, currency)}</span>
           </div>

@@ -1267,9 +1267,11 @@ function MainApp() {
   };
 
   const handleSavingsRateChange = (rate: number) => {
+    const clamped = Math.max(0, Math.min(100, rate));
+    const normalized = Math.round(clamped * 1000000) / 1000000;
     updateActiveMonth(m => ({
       ...m,
-      savingsRate: Math.max(0, Math.min(100, Math.round(rate))),
+      savingsRate: normalized,
     }));
   };
 
@@ -1975,6 +1977,8 @@ function MainApp() {
               onUpdateCategoryLabel={handleUpdateCategoryLabel}
               onDeleteCategory={handleDeleteCategory}
               language={language}
+              month={month}
+              year={year}
               daysInMonth={daysInMonth}
             />
 
@@ -2048,6 +2052,8 @@ function MainApp() {
               onUpdateCategoryLabel={handleUpdateCategoryLabel}
               onDeleteCategory={handleDeleteCategory}
               language={language}
+              month={month}
+              year={year}
               daysInMonth={daysInMonth}
             />
           </div>

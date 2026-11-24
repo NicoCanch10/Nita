@@ -1030,7 +1030,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         <div 
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1 touch-pan-y"
+          className="p-5 sm:p-6 overflow-y-auto no-scrollbar space-y-5 flex-1 touch-pan-y"
         >
           <div key={currentStep.id} className="space-y-5 animate-in fade-in duration-200">
             <div>

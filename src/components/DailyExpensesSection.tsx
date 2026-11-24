@@ -14,6 +14,7 @@ import {
   getTranslations 
 } from '../utils/languages';
 import { CategoryManagerModal } from './CategoryManagerModal';
+import { MonthCalendarInput } from './MonthCalendarInput';
 import { 
   Plus, 
   Trash2, 
@@ -113,6 +114,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   useEffect(() => {
     if (!editingExpenseId && !isAddModalOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') {
         if (editingExpenseId) {
           setEditingExpenseId(null);
@@ -527,18 +529,19 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                 </div>
               </div>
 
-              {/* Fecha */}
-              <div className="sm:col-span-4">
+              {/* Fecha (solo calendario del mes en curso e idioma seleccionado en NITA, formato numérico) */}
+              <div className="sm:col-span-4 relative">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Fecha
+                  {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
                 </label>
-                <input
-                  type="date"
+                <MonthCalendarInput
                   value={date}
-                  min={`${year}-${String(month + 1).padStart(2, '0')}-01`}
-                  max={`${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+                  onChange={setDate}
+                  month={month}
+                  year={year}
+                  daysInMonth={daysInMonth}
+                  language={language}
+                  accentColor="emerald"
                   required
                 />
               </div>
@@ -674,18 +677,19 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                   </select>
                 </div>
 
-                {/* Fecha */}
-                <div className="sm:col-span-4">
+                {/* Fecha (solo calendario del mes en curso e idioma seleccionado en NITA, formato numérico) */}
+                <div className="sm:col-span-4 relative">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Fecha
+                    {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
                   </label>
-                  <input
-                    type="date"
+                  <MonthCalendarInput
                     value={editDate}
-                    min={`${year}-${String(month + 1).padStart(2, '0')}-01`}
-                    max={`${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`}
-                    onChange={(e) => setEditDate(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+                    onChange={setEditDate}
+                    month={month}
+                    year={year}
+                    daysInMonth={daysInMonth}
+                    language={language}
+                    accentColor="emerald"
                     required
                   />
                 </div>

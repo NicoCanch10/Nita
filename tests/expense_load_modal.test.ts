@@ -47,7 +47,7 @@ describe('NITA — Simplificación de botones CARGAR + y modal de carga en Gasto
     assert.equal(html.includes('<form'), false, 'No debe renderizar formulario inline permanente');
   });
 
-  test('2. FixedExpensesSection al abrir el modal "Cargar Gasto Fijo" conserva todos los campos originales', () => {
+  test('2. FixedExpensesSection al abrir el modal "Cargar Gasto Fijo" conserva todos los campos originales y muestra calendario del mes', () => {
     const html = renderToStaticMarkup(
       React.createElement(FixedExpensesSection, {
         expenses: [],
@@ -62,6 +62,8 @@ describe('NITA — Simplificación de botones CARGAR + y modal de carga en Gasto
         onUpdateCategoryColor: noop,
         onDeleteCategory: noop,
         language: 'es',
+        month: 10,
+        year: 2026,
         daysInMonth: 30,
         initialAddModalOpen: true,
       })
@@ -78,8 +80,10 @@ describe('NITA — Simplificación de botones CARGAR + y modal de carga en Gasto
     assert.equal(html.includes('<option value="housing"'), true);
     assert.equal(html.includes('<option value="custom_gym"'), true);
     assert.equal(html.includes('(Personalizada)'), true);
-    assert.equal(html.includes('Vto (1-30)'), true);
-    assert.equal(html.includes('max="30"'), true);
+    assert.equal(html.includes('Fecha'), true);
+    assert.equal(html.includes('lang="es"'), true);
+    assert.equal(html.includes('data-min="2026-11-01"'), true);
+    assert.equal(html.includes('data-max="2026-11-30"'), true);
     assert.equal(html.includes('Cancelar'), true);
     assert.equal(html.includes('Cargar Gasto'), true);
   });
@@ -144,11 +148,34 @@ describe('NITA — Simplificación de botones CARGAR + y modal de carga en Gasto
     assert.equal(html.includes('<option value="custom_gym"'), true);
     assert.equal(html.includes('(Personalizada)'), true);
     assert.equal(html.includes('Fecha'), true);
-    assert.equal(html.includes('type="date"'), true);
-    assert.equal(html.includes('min="2026-10-01"'), true);
-    assert.equal(html.includes('max="2026-10-31"'), true);
+    assert.equal(html.includes('lang="es"'), true);
+    assert.equal(html.includes('data-min="2026-10-01"'), true);
+    assert.equal(html.includes('data-max="2026-10-31"'), true);
+    assert.equal(html.includes('value="01/10/2026"'), true);
     assert.equal(html.includes('Cancelar'), true);
     assert.equal(html.includes('Cargar Gasto'), true);
+
+    const htmlEn = renderToStaticMarkup(
+      React.createElement(DailyExpensesSection, {
+        expenses: [],
+        categories: TEST_CATEGORIES,
+        currency: 'USD',
+        month: 9,
+        year: 2026,
+        dailyBudget: 5000,
+        daysInMonth: 31,
+        language: 'en',
+        onAddExpense: noop,
+        onDeleteExpense: noop,
+        onUpdateExpense: noop,
+        onAddCategory: noop,
+        onUpdateCategoryColor: noop,
+        onDeleteCategory: noop,
+        initialAddModalOpen: true,
+      })
+    );
+    assert.equal(htmlEn.includes('lang="en"'), true);
+    assert.equal(htmlEn.includes('value="10/01/2026"'), true);
   });
 
   test('5. Formateo y parseo de separadores de miles y decimales en inputs de dinero (ej: 1.000 / 10.325,24)', () => {
