@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 import { CurrencyCode, FixedExpense, VariableExpense, CategoryInfo } from '../types/budget';
-import { getCategoryInfo, formatCurrency } from '../utils/currency';
+import { formatCurrency } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
 import { 
   PieChart, 
@@ -10,6 +10,226 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
+
+function splitPieLabel(label: string, maxCharsPerLine: number, maxLines: number): string[] {
+  const clean = label.trim().replace(/\s+/g, ' ');
+  if (!clean) return [];
+  if (maxLines <= 1) {
+    return [
+      clean.length > maxCharsPerLine
+        ? `${clean.slice(0, Math.max(1, maxCharsPerLine - 1)).trimEnd()}…`
+        : clean,
+    ];
+  }
+  if (clean.length <= maxCharsPerLine) return [clean];
+
+  const words = clean.split(' ');
+  const lines: string[] = [];
+  let i = 0;
+
+  while (i < words.length && lines.length < maxLines) {
+    if (lines.length === maxLines - 1) {
+      const remaining = words.slice(i).join(' ');
+      lines.push(
+        remaining.length > maxCharsPerLine
+          ? `${remaining.slice(0, Math.max(1, maxCharsPerLine - 1)).trimEnd()}…`
+          : remaining
+      );
+      break;
+    }
+
+    let line = words[i];
+    i++;
+    if (line.length > maxCharsPerLine) {
+      lines.push(`${line.slice(0, Math.max(1, maxCharsPerLine - 1))}…`);
+      continue;
+    }
+    while (i < words.length && `${line} ${words[i]}`.length <= maxCharsPerLine) {
+      line = `${line} ${words[i]}`;
+      i++;
+    }
+    lines.push(line);
+  }
+
+  return lines;
+}
+
+function getSliceLabelConfig(
+  label: string,
+  startAngle: number,
+  angle: number,
+  isFullCircle: boolean,
+  cx: number,
+  cy: number,
+  r: number
+) {
+  const clean = label.trim().replace(/\s+/g, ' ');
+  if (!clean) return null;
+
+  const midAngle = startAngle + angle / 2;
+  const midRad = (midAngle * Math.PI) / 180;
+
+  if (isFullCircle) {
+    return {
+      x: cx,
+      y: cy,
+      rotate: 0,
+      fontSize: 13,
+      lines: splitPieLabel(clean, 18, 3),
+    };
+  }
+
+  // Wide slices: place horizontal text inside only if the full name fits without truncation
+  if (angle >= 48) {
+    const labelR = angle >= 130 ? r * 0.48 : r * 0.57;
+    const fontSize = angle >= 100 ? 11.5 : 10;
+    const availableWidth = 2 * labelR * Math.sin((Math.min(angle, 140) * Math.PI) / 360) * 0.84;
+    const maxChars = Math.max(6, Math.floor(availableWidth / (fontSize * 0.6)));
+    const lines = splitPieLabel(clean, maxChars, angle >= 110 ? 3 : 2);
+    const fitsWithoutTruncation =
+      !lines.some((l) => l.endsWith('…')) &&
+      lines.every((l) => l.length * fontSize * 0.6 <= availableWidth);
+
+    if (fitsWithoutTruncation) {
+      return {
+        x: cx + labelR * Math.cos(midRad),
+        y: cy + labelR * Math.sin(midRad),
+        rotate: 0,
+        fontSize,
+        lines,
+      };
+    }
+  }
+
+  // Medium slices: place radial 1-line text inside only if the full name fits cleanly
+  if (angle >= 16) {
+    const fontSize = angle >= 30 ? 9.5 : 8.5;
+    const radialSpace = r * 0.64;
+    const innerThickness = 2 * (r * 0.42) * Math.sin((angle * Math.PI) / 360);
+    const estTextWidth = clean.length * fontSize * 0.56;
+
+    if (estTextWidth <= radialSpace && innerThickness >= fontSize * 1.45) {
+      const labelR = r * 0.61;
+      const rotate = Math.cos(midRad) < 0 ? midAngle - 180 : midAngle;
+      return {
+        x: cx + labelR * Math.cos(midRad),
+        y: cy + labelR * Math.sin(midRad),
+        rotate,
+        fontSize,
+        lines: [clean],
+      };
+    }
+  }
+
+  // Name does not fit cleanly inside slice -> render an arrow leading to its external label
+  return null;
+}
+
+interface RawCalloutInput {
+  key: string;
+  label: string;
+  color: string;
+  midAngle: number;
+}
+
+interface PositionedCallout extends RawCalloutInput {
+  ax: number;
+  ay: number;
+  ex: number;
+  ey: number;
+  lx: number;
+  ly: number;
+  arrowBaseX: number;
+  isRight: boolean;
+  lines: string[];
+}
+
+function layoutExternalCallouts(
+  items: RawCalloutInput[],
+  cx: number,
+  cy: number,
+  r: number
+): PositionedCallout[] {
+  if (items.length === 0) return [];
+
+  const lineHeight = 11;
+  const prepareSide = (sideItems: RawCalloutInput[], isRight: boolean): PositionedCallout[] => {
+    const sorted = [...sideItems].sort((a, b) => {
+      const ay = cy + r * Math.sin((a.midAngle * Math.PI) / 180);
+      const by = cy + r * Math.sin((b.midAngle * Math.PI) / 180);
+      return ay - by;
+    });
+
+    const draft = sorted.map((item) => {
+      const midRad = (item.midAngle * Math.PI) / 180;
+      const ax = cx + r * 0.85 * Math.cos(midRad);
+      const ay = cy + r * 0.85 * Math.sin(midRad);
+      const ex = cx + (r + 10) * Math.cos(midRad);
+      const ey = cy + (r + 10) * Math.sin(midRad);
+      const lines = splitPieLabel(item.label, 14, 2);
+      const height = lines.length * lineHeight + 6;
+      return { ...item, ax, ay, ex, ey, ly: ey, height, lines };
+    });
+
+    const minY = cy - r - 18;
+    const maxY = cy + r + 18;
+
+    // Resolve vertical overlaps top-to-bottom
+    for (let i = 0; i < draft.length; i++) {
+      const half = draft[i].height / 2;
+      if (i === 0) {
+        draft[i].ly = Math.max(minY + half, draft[i].ly);
+      } else {
+        const prevBottom = draft[i - 1].ly + draft[i - 1].height / 2;
+        if (draft[i].ly - half < prevBottom) {
+          draft[i].ly = prevBottom + half;
+        }
+      }
+    }
+
+    // Pull back up if last item exceeds bottom boundary
+    for (let i = draft.length - 1; i >= 0; i--) {
+      const half = draft[i].height / 2;
+      if (i === draft.length - 1) {
+        draft[i].ly = Math.min(maxY - half, draft[i].ly);
+      } else {
+        const nextTop = draft[i + 1].ly - draft[i + 1].height / 2;
+        if (draft[i].ly + half > nextTop) {
+          draft[i].ly = nextTop - half;
+        }
+      }
+    }
+
+    return draft.map((d) => {
+      const dy = Math.abs(d.ly - cy);
+      const circleExtentX = dy < r + 8 ? Math.sqrt(Math.max(0, (r + 8) ** 2 - dy ** 2)) : 0;
+      const lx = isRight
+        ? Math.max(cx + r + 18, cx + circleExtentX + 12)
+        : Math.min(cx - r - 18, cx - circleExtentX - 12);
+      const arrowBaseX = isRight ? lx - 5.5 : lx + 5.5;
+      return {
+        key: d.key,
+        label: d.label,
+        color: d.color,
+        midAngle: d.midAngle,
+        ax: d.ax,
+        ay: d.ay,
+        ex: d.ex,
+        ey: d.ey,
+        lx,
+        ly: d.ly,
+        arrowBaseX,
+        isRight,
+        lines: d.lines,
+      };
+    });
+  };
+
+  const rightItems = items.filter((item) => Math.cos((item.midAngle * Math.PI) / 180) >= 0);
+  const leftItems = items.filter((item) => Math.cos((item.midAngle * Math.PI) / 180) < 0);
+
+  return [...prepareSide(rightItems, true), ...prepareSide(leftItems, false)];
+}
 
 interface FinancialHealthSectionProps {
   income: number;
@@ -36,6 +256,7 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   collapsible = true,
 }) => {
   const t = getTranslations(language);
+  const chartUid = useId().replace(/:/g, '');
   // Collapsed by default only when collapsible (general menu); always expanded in dedicated tab
   const [isExpanded, setIsExpanded] = useState(!collapsible);
   const showContent = !collapsible || isExpanded;
@@ -43,9 +264,9 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   // Simulator states
   const [simSavingReduction, setSimSavingReduction] = useState<number>(30000);
   const [simIncomeBoost, setSimIncomeBoost] = useState<number>(0);
+  const [hoveredComposition, setHoveredComposition] = useState<string | null>(null);
 
   const totalFixed = fixedExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalVariable = variableExpenses.reduce((sum, e) => sum + e.amount, 0);
   
   // Distribución del porcentaje:
   // 1º Tomar Ingreso Neto Mensual
@@ -56,20 +277,6 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   // 3º Distribuir entre Gastos Fijos y Gastos Variables
   const fixedPct = income > 0 ? Math.round((totalFixed / income) * 100) : 0;
   const variablePct = income > 0 ? Math.round(Math.max(0, 100 - savingsPct - fixedPct) * 100) / 100 : 0;
-
-  // Category breakdown
-  const categoryTotals: Record<string, number> = {};
-  fixedExpenses.forEach(e => {
-    categoryTotals[e.category] = (categoryTotals[e.category] || 0) + e.amount;
-  });
-  variableExpenses.forEach(e => {
-    categoryTotals[e.category] = (categoryTotals[e.category] || 0) + e.amount;
-  });
-  if (totalSavings > 0) {
-    categoryTotals['savings'] = (categoryTotals['savings'] || 0) + totalSavings;
-  }
-
-  const grandTotal = Object.values(categoryTotals).reduce((a, b) => a + b, 0);
 
   // Simulation calculations
   const simNewIncome = income + simIncomeBoost;
@@ -85,9 +292,6 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   const simNewDailyBase = daysInMonth > 0 ? simNewRemaining / daysInMonth : 0;
   const currentDailyBase = daysInMonth > 0 ? (income - totalFixed - totalSavings) / daysInMonth : 0;
   const dailyGain = simNewDailyBase - currentDailyBase;
-
-  // Sorted categories by highest percentage to lowest percentage
-  const sortedCategoryEntries = Object.entries(categoryTotals).sort(([, a], [, b]) => b - a);
 
   const headerTitleContent = (
     <div className="flex items-center gap-3 min-w-0">
@@ -142,30 +346,18 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
             
             {/* 50/30/20 Rule Analysis & Category Breakdown */}
             <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xs space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <PieChart className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                    {t.healthTitle}
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    {t.rule503020Summary}
-                  </p>
-                </div>
-              </div>
-
               {/* 3 Pillars: Necesidades, Deseos, Ahorro */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-2">
                 {/* Fijos (Ideal: <= 50%) */}
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2">
-                  <div className="flex items-center justify-between text-2xs">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 flex flex-col gap-2 sm:row-span-3 sm:grid sm:grid-rows-subgrid">
+                  <div className="flex items-start justify-between text-2xs">
                     <span className="font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.needsFixed}</span>
                   </div>
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex items-baseline lg:items-center gap-2">
                     <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tabular-nums">
                       {fixedPct}%
                     </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">{t.savingsRateLabel}</span>
+                    <span className="text-xs leading-tight text-slate-500 dark:text-slate-400">{t.savingsRateLabel}</span>
                   </div>
                   <p className="text-2xs text-slate-500 dark:text-slate-400">
                     {fixedPct <= 50 ? (
@@ -177,15 +369,15 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                 </div>
 
                 {/* Gastos Variables / Flexibles (Ideal: ~30%) */}
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2">
-                  <div className="flex items-center justify-between text-2xs">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 flex flex-col gap-2 sm:row-span-3 sm:grid sm:grid-rows-subgrid">
+                  <div className="flex items-start justify-between text-2xs">
                     <span className="font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.wantsVariable}</span>
                   </div>
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex items-baseline lg:items-center gap-2">
                     <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tabular-nums">
                       {variablePct}%
                     </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">{t.available}</span>
+                    <span className="text-xs leading-tight text-slate-500 dark:text-slate-400">{t.available}</span>
                   </div>
                   <p className="text-2xs text-slate-500 dark:text-slate-400">
                     {t.flowForJars}
@@ -193,15 +385,15 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                 </div>
 
                 {/* Capacidad proyectada */}
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2">
-                  <div className="flex items-center justify-between text-2xs">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 flex flex-col gap-2 sm:row-span-3 sm:grid sm:grid-rows-subgrid">
+                  <div className="flex items-start justify-between text-2xs">
                     <span className="font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.savingsTarget}</span>
                   </div>
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex items-baseline lg:items-center gap-2">
                     <span className="text-xl sm:text-2xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
                       {savingsPct}%
                     </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">{t.savingsRateLabel}</span>
+                    <span className="text-xs leading-tight text-slate-500 dark:text-slate-400">{t.savingsRateLabel}</span>
                   </div>
                   <p className="text-2xs text-slate-500 dark:text-slate-400">
                     {t.savingsBarSubtitle}
@@ -209,73 +401,311 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                 </div>
               </div>
 
-              {/* Progress visual bar: Gastos Fijos -> Gastos Variables -> Ahorro */}
-              <div className="space-y-2">
-                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">{t.moneyComposition}</span>
-                <div className="h-4 rounded-full bg-slate-100 dark:bg-slate-800 flex overflow-hidden shadow-inner">
-                  {/* 1º Gastos Fijos */}
-                  <div 
-                    style={{ width: `${Math.min(100, fixedPct)}%` }} 
-                    className="bg-blue-600 h-full transition-all"
-                    title={`${t.needsFixed}: ${fixedPct}%`}
-                  />
-                  {/* 2º Gastos Variables */}
-                  <div 
-                    style={{ width: `${Math.min(Math.max(0, 100 - fixedPct), variablePct)}%` }} 
-                    className="bg-indigo-500 h-full transition-all"
-                    title={`${t.wantsVariable}: ${variablePct}%`}
-                  />
-                  {/* 3º Ahorro */}
-                  <div 
-                    style={{ width: `${Math.max(0, 100 - fixedPct - variablePct)}%` }} 
-                    className="bg-emerald-500 h-full transition-all"
-                    title={`${t.savingsBarTitle}: ${savingsPct}%`}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-2xs text-slate-500 dark:text-slate-400">
-                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-600 inline-block"/> {t.tabFixed} ({fixedPct}%)</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-indigo-500 inline-block"/> {t.variableExpenses} ({variablePct}%)</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"/> {t.savingsBarTitle} ({savingsPct}%)</span>
-                </div>
-              </div>
-
-              {/* Category distribution - Sorted from highest % to lowest % */}
-              <div className="space-y-3 pt-2">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider block">
-                  {t.categoryBreakdownTitle}
+              {/* Pie Chart (left) & Concept Descriptions (right): Gastos Fijos -> Gastos Variables -> Ahorro */}
+              <div className="space-y-3">
+                <span className="text-[15px] font-semibold text-slate-700 dark:text-slate-300 block">
+                  {t.moneyComposition}
                 </span>
-                <div className="space-y-2">
-                  {sortedCategoryEntries.map(([catKey, total]) => {
-                    const info = getCategoryInfo(catKey, categories, language);
-                    const pct = grandTotal > 0 ? ((total / grandTotal) * 100).toFixed(1) : '0';
 
-                    return (
-                      <div key={catKey} className="space-y-1">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                            <span 
-                              className="w-2 h-2 rounded-full" 
-                              style={{ backgroundColor: info.color }}
+                {(() => {
+                  const variableAmount = Math.max(0, income - totalFixed - totalSavings);
+                  const pieItems = [
+                    {
+                      key: 'fixed',
+                      label: t.tabFixed,
+                      pct: Math.max(0, fixedPct),
+                      amount: totalFixed,
+                      color: '#2563eb',
+                    },
+                    {
+                      key: 'variable',
+                      label: t.variableExpenses,
+                      pct: Math.max(0, variablePct),
+                      amount: variableAmount,
+                      color: '#6366f1',
+                    },
+                    {
+                      key: 'savings',
+                      label: t.savingsBarTitle,
+                      pct: Math.max(0, savingsPct),
+                      amount: totalSavings,
+                      color: '#10b981',
+                    },
+                  ];
+
+                  const totalPiePct = pieItems.reduce((sum, item) => sum + item.pct, 0);
+                  const cx = 160;
+                  const cy = 152;
+                  const r = 128;
+                  let cumulativeAngle = -90;
+
+                  const slices = pieItems
+                    .filter((item) => item.pct > 0 && totalPiePct > 0)
+                    .map((item) => {
+                      const fraction = item.pct / totalPiePct;
+                      const angle = fraction * 360;
+                      const startAngle = cumulativeAngle;
+                      const endAngle = startAngle + angle;
+                      cumulativeAngle = endAngle;
+
+                      const startRad = (startAngle * Math.PI) / 180;
+                      const endRad = (endAngle * Math.PI) / 180;
+                      const x1 = cx + r * Math.cos(startRad);
+                      const y1 = cy + r * Math.sin(startRad);
+                      const x2 = cx + r * Math.cos(endRad);
+                      const y2 = cy + r * Math.sin(endRad);
+                      const largeArc = angle > 180 ? 1 : 0;
+                      const isFullCircle = fraction >= 0.9999;
+
+                      const pathD = `M ${cx} ${cy} L ${x1.toFixed(3)} ${y1.toFixed(3)} A ${r} ${r} 0 ${largeArc} 1 ${x2.toFixed(3)} ${y2.toFixed(3)} Z`;
+                      const labelCfg = getSliceLabelConfig(
+                        item.label,
+                        startAngle,
+                        angle,
+                        isFullCircle,
+                        cx,
+                        cy,
+                        r
+                      );
+
+                      return {
+                        ...item,
+                        midAngle: startAngle + angle / 2,
+                        isFullCircle,
+                        pathD,
+                        clipId: `${chartUid}-comp-${item.key}`,
+                        labelCfg,
+                      };
+                    });
+
+                  const callouts = layoutExternalCallouts(
+                    slices
+                      .filter((s) => !s.labelCfg)
+                      .map((s) => ({
+                        key: s.key,
+                        label: s.label,
+                        color: s.color,
+                        midAngle: s.midAngle,
+                      })),
+                    cx,
+                    cy,
+                    r
+                  );
+                  const hasCallouts = callouts.length > 0;
+                  const hasLeftCallouts = callouts.some((c) => !c.isRight);
+                  const hasRightCallouts = callouts.some((c) => c.isRight);
+                  const vbMinX = hasLeftCallouts ? cx - r - 98 : cx - r - 10;
+                  const vbMaxX = hasRightCallouts ? cx + r + 98 : cx + r + 10;
+                  const svgViewBox = hasCallouts
+                    ? `${vbMinX} 0 ${vbMaxX - vbMinX} 304`
+                    : `${cx - r - 10} ${cy - r - 10} ${r * 2 + 20} ${r * 2 + 20}`;
+
+                  return (
+                    <div className="flex flex-col sm:flex-row items-center gap-5 sm:gap-6">
+                      {/* Gráfico en formato torta a la izquierda */}
+                      <div className="shrink-0 max-w-full flex items-center justify-center sm:justify-start">
+                        <svg
+                          viewBox={svgViewBox}
+                          className={
+                            hasCallouts
+                              ? 'h-[246px] sm:h-[246px] md:h-[264px] lg:h-[228px] xl:h-[282px] w-auto max-w-full drop-shadow-xs'
+                              : 'h-56 sm:h-56 md:h-60 lg:h-52 xl:h-64 w-auto max-w-full drop-shadow-xs'
+                          }
+                          role="img"
+                          aria-label={t.moneyComposition}
+                          onMouseLeave={() => setHoveredComposition(null)}
+                        >
+                          <defs>
+                            {slices.map((slice) => (
+                              <clipPath key={slice.clipId} id={slice.clipId}>
+                                {slice.isFullCircle ? (
+                                  <circle cx={cx} cy={cy} r={r} />
+                                ) : (
+                                  <path d={slice.pathD} />
+                                )}
+                              </clipPath>
+                            ))}
+                          </defs>
+                          {slices.length === 0 ? (
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={r}
+                              className="fill-slate-200 dark:fill-slate-800"
                             />
-                            {info.label}
-                          </span>
-                          <span className="font-extrabold text-slate-900 dark:text-white tabular-nums">
-                            {formatCurrency(total, currency)} <span className="text-slate-400 dark:text-slate-500 font-normal">({pct}%)</span>
-                          </span>
-                        </div>
-                        <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{ 
-                              width: `${pct}%`,
-                              backgroundColor: info.color 
-                            }}
-                          />
-                        </div>
+                          ) : (
+                            <>
+                              {slices.map((slice) => {
+                                const isDimmed =
+                                  hoveredComposition !== null && hoveredComposition !== slice.key;
+                                return (
+                                  <g
+                                    key={slice.key}
+                                    className={`transition-opacity duration-150 cursor-pointer ${
+                                      isDimmed ? 'opacity-40' : 'opacity-100'
+                                    }`}
+                                    onMouseEnter={() => setHoveredComposition(slice.key)}
+                                  >
+                                    {slice.isFullCircle ? (
+                                      <circle
+                                        cx={cx}
+                                        cy={cy}
+                                        r={r}
+                                        fill={slice.color}
+                                        className="stroke-white dark:stroke-slate-900"
+                                        strokeWidth="2"
+                                      >
+                                        <title>{`${slice.label}: ${formatCurrency(slice.amount, currency)} (${slice.pct}%)`}</title>
+                                      </circle>
+                                    ) : (
+                                      <path
+                                        d={slice.pathD}
+                                        fill={slice.color}
+                                        className="stroke-white dark:stroke-slate-900"
+                                        strokeWidth="2"
+                                        strokeLinejoin="round"
+                                      >
+                                        <title>{`${slice.label}: ${formatCurrency(slice.amount, currency)} (${slice.pct}%)`}</title>
+                                      </path>
+                                    )}
+                                    {slice.labelCfg && (
+                                      <g clipPath={`url(#${slice.clipId})`} className="pointer-events-none select-none">
+                                        <text
+                                          x={slice.labelCfg.x}
+                                          y={slice.labelCfg.y}
+                                          transform={
+                                            slice.labelCfg.rotate !== 0
+                                              ? `rotate(${slice.labelCfg.rotate.toFixed(2)} ${slice.labelCfg.x.toFixed(2)} ${slice.labelCfg.y.toFixed(2)})`
+                                              : undefined
+                                          }
+                                          textAnchor="middle"
+                                          dominantBaseline="central"
+                                          fill="#ffffff"
+                                          fontSize={slice.labelCfg.fontSize}
+                                          fontWeight="800"
+                                          style={{
+                                            paintOrder: 'stroke',
+                                            stroke: 'rgba(15, 23, 42, 0.55)',
+                                            strokeWidth: '2.5px',
+                                            strokeLinejoin: 'round',
+                                          }}
+                                        >
+                                          {(() => {
+                                            const totalLines = slice.labelCfg.lines.length;
+                                            const lineStep = slice.labelCfg.fontSize * 1.15;
+                                            const startOffset = -((totalLines - 1) * lineStep) / 2;
+                                            return slice.labelCfg.lines.map((line, idx) => (
+                                              <tspan
+                                                key={idx}
+                                                x={slice.labelCfg!.x}
+                                                y={slice.labelCfg!.y + startOffset + idx * lineStep}
+                                              >
+                                                {line}
+                                              </tspan>
+                                            ));
+                                          })()}
+                                        </text>
+                                      </g>
+                                    )}
+                                  </g>
+                                );
+                              })}
+
+                              {callouts.map((c) => {
+                                const isDimmed =
+                                  hoveredComposition !== null && hoveredComposition !== c.key;
+                                const lineStep = 10.5;
+                                const startOffset = -((c.lines.length - 1) * lineStep) / 2;
+                                const textX = c.isRight ? c.lx + 4.5 : c.lx - 4.5;
+                                const arrowPoints = c.isRight
+                                  ? `${c.lx},${c.ly} ${c.arrowBaseX},${c.ly - 3} ${c.arrowBaseX},${c.ly + 3}`
+                                  : `${c.lx},${c.ly} ${c.arrowBaseX},${c.ly - 3} ${c.arrowBaseX},${c.ly + 3}`;
+                                return (
+                                  <g
+                                    key={`callout-${c.key}`}
+                                    className={`transition-opacity duration-150 cursor-pointer ${
+                                      isDimmed ? 'opacity-35' : 'opacity-100'
+                                    }`}
+                                    onMouseEnter={() => setHoveredComposition(c.key)}
+                                  >
+                                    <circle cx={c.ax} cy={c.ay} r="2.5" fill={c.color} />
+                                    <polyline
+                                      points={`${c.ax.toFixed(1)},${c.ay.toFixed(1)} ${c.ex.toFixed(1)},${c.ey.toFixed(1)} ${c.arrowBaseX.toFixed(1)},${c.ly.toFixed(1)}`}
+                                      fill="none"
+                                      stroke={c.color}
+                                      strokeWidth="1.6"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                    <polygon points={arrowPoints} fill={c.color} />
+                                    <text
+                                      x={textX}
+                                      y={c.ly}
+                                      textAnchor={c.isRight ? 'start' : 'end'}
+                                      dominantBaseline="central"
+                                      fontSize="9.5"
+                                      fontWeight="700"
+                                      className="fill-slate-700 dark:fill-slate-200 select-none"
+                                    >
+                                      {c.lines.map((line, idx) => (
+                                        <tspan
+                                          key={idx}
+                                          x={textX}
+                                          y={c.ly + startOffset + idx * lineStep}
+                                        >
+                                          {line}
+                                        </tspan>
+                                      ))}
+                                    </text>
+                                  </g>
+                                );
+                              })}
+                            </>
+                          )}
+                        </svg>
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {/* Descripciones de los conceptos a la derecha */}
+                      <div
+                        className="flex-1 w-full space-y-2 min-w-0"
+                        onMouseLeave={() => setHoveredComposition(null)}
+                      >
+                        {pieItems.map((item) => {
+                          const isHighlighted = hoveredComposition === item.key;
+                          return (
+                            <div
+                              key={item.key}
+                              onMouseEnter={() => setHoveredComposition(item.key)}
+                              className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border transition-colors duration-150 cursor-pointer ${
+                                isHighlighted
+                                  ? 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600'
+                                  : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/80 dark:border-slate-700/80'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span
+                                  className="w-3 h-3 rounded-full shrink-0"
+                                  style={{ backgroundColor: item.color }}
+                                />
+                                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">
+                                  {item.label}
+                                </span>
+                              </div>
+                              <div className="flex items-baseline gap-1.5 shrink-0 tabular-nums">
+                                <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                                  {formatCurrency(item.amount, currency)}
+                                </span>
+                                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                                  ({item.pct}%)
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
             </div>

@@ -10,10 +10,6 @@ import {
 } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
 import { 
-  Sparkles, 
-  Clock, 
-  CheckCircle2, 
-  AlertCircle,
   Wallet,
   Check,
   X,
@@ -46,13 +42,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   onIncomeChange,
   onSavingsRateChange,
   totalFixedExpenses,
-  paidFixedExpenses,
-  pendingFixedExpenses,
-  totalVariableSpent,
   monthlyRemaining,
   calcDetails,
   currency,
-  currentDay,
   language = 'es',
 }) => {
   const t = getTranslations(language);
@@ -66,28 +58,10 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   const [localSavingsRate, setLocalSavingsRate] = useState<number>(savingsRate);
   const throttleTimerRef = useRef<number | null>(null);
 
-  const [isMobile, setIsMobile] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    if (typeof window.matchMedia === 'function') {
-      return !window.matchMedia('(min-width: 640px)').matches;
-    }
-    return window.innerWidth < 640;
-  });
-
   // Sync external changes
   useEffect(() => {
     setLocalSavingsRate(savingsRate);
   }, [savingsRate]);
-
-  // Match Tailwind `sm:` (>= 640px) breakpoint exactly for mobile-exclusive slider range
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const mediaQuery = window.matchMedia('(min-width: 640px)');
-    const handleChange = () => setIsMobile(!mediaQuery.matches);
-    handleChange();
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -155,7 +129,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
     setIsEditingSavingsAmount(false);
   };
 
-  const maxSliderRate = isMobile ? 100 : 50;
+  const maxSliderRate = 100;
 
   const handleSliderChange = (rawVal: number) => {
     const newVal = Math.max(0, Math.min(maxSliderRate, Math.round(rawVal)));
@@ -214,34 +188,27 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
     }
   };
 
-  const fixedExpensesPercentage = income > 0 ? ((totalFixedExpenses / income) * 100).toFixed(1) : '0';
-  const remainingPercentage = income > 0 ? ((monthlyRemaining / income) * 100).toFixed(1) : '0';
-
-  // Pace calculation if currently in this month
-  const targetSpentToDate = currentDay ? calcDetails.dailyBaseBudget * currentDay : null;
-  const isAheadOfPace = targetSpentToDate !== null ? totalVariableSpent <= targetSpentToDate : null;
-
   return (
     <div className="space-y-6">
       
-      {/* Primary KPI Card: INGRESO NETO MENSUAL (con edición) + GASTOS VARIABLES (debajo en tamaño menor) */}
+      {/* Primary KPI Card: INGRESO NETO MENSUAL (con edición) */}
       <div>
-        <div className="bg-linear-to-br from-blue-700 via-blue-600 to-indigo-800 text-white p-6 sm:p-7 rounded-3xl shadow-sm relative overflow-hidden flex flex-col justify-between">
+        <div className="bg-linear-to-br from-blue-700 via-blue-600 to-indigo-800 text-white p-5 sm:p-7 rounded-3xl shadow-sm relative overflow-hidden flex flex-col justify-between">
           <div className="relative z-10">
             
             {/* Header: Ingreso Neto Mensual Title */}
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-blue-100 text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
-                <Wallet className="w-4 h-4 text-blue-200" />
+            <div className="flex items-center justify-between mb-2 sm:mb-1.5">
+              <span className="text-blue-50 sm:text-blue-100 text-sm sm:text-xs font-black uppercase tracking-wider flex items-center gap-2 sm:gap-1.5">
+                <Wallet className="w-4 h-4 text-blue-100 sm:text-blue-200 shrink-0" />
                 {t.netIncome}
               </span>
             </div>
 
             {/* Income Amount Display or Inline Edit Form */}
             {isEditingIncome ? (
-              <form onSubmit={handleIncomeSubmit} className="flex items-center gap-2 mt-2 max-w-sm">
-                <div className="flex items-center w-full bg-white border-2 border-white rounded-xl shadow-md">
-                  <span className="pl-3.5 pr-1 text-xl font-black text-slate-400 select-none shrink-0">
+              <form onSubmit={handleIncomeSubmit} className="flex items-center gap-2 mt-2.5 sm:mt-2 w-full sm:max-w-sm">
+                <div className="flex items-center w-full bg-white border-2 border-white rounded-2xl sm:rounded-xl shadow-md">
+                  <span className="pl-3.5 pr-1 text-2xl sm:text-xl font-black text-slate-400 select-none shrink-0">
                     {currencySymbol}
                   </span>
                   <input
@@ -252,12 +219,12 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                     onFocus={(e) => e.target.select()}
                     autoFocus
                     placeholder={t.incomePlaceholder}
-                    className="w-full min-w-0 bg-transparent text-slate-900 pr-3.5 py-2 text-xl font-black focus:outline-hidden tabular-nums"
+                    className="w-full min-w-0 bg-transparent text-slate-900 pr-3.5 py-2.5 sm:py-2 text-2xl sm:text-xl font-black focus:outline-hidden tabular-nums"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="p-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-colors cursor-pointer shrink-0 shadow-md"
+                  className="p-3 sm:p-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl sm:rounded-xl transition-colors cursor-pointer shrink-0 shadow-md"
                   title={t.confirmAmount}
                 >
                   <Check className="w-5 h-5" />
@@ -265,7 +232,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsEditingIncome(false)}
-                  className="p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-xl transition-colors cursor-pointer shrink-0"
+                  className="p-3 sm:p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-2xl sm:rounded-xl transition-colors cursor-pointer shrink-0"
                   title={t.cancel}
                 >
                   <X className="w-5 h-5" />
@@ -278,42 +245,21 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                   setTempIncome(formatAmountForInput(income, true));
                   setIsEditingIncome(true);
                 }}
-                className="group flex items-center gap-2.5 text-left cursor-pointer transition-opacity hover:opacity-95 mt-1 focus:outline-hidden max-w-full"
+                className="group w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 sm:gap-2.5 text-left cursor-pointer transition-all hover:opacity-95 mt-1 focus:outline-hidden max-w-full bg-white/15 sm:bg-transparent border border-white/25 sm:border-transparent rounded-2xl sm:rounded-none px-3 py-2.5 sm:p-0 shadow-xs sm:shadow-none"
                 title={t.clickToEditIncome}
               >
-                <h3 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight tabular-nums group-hover:underline underline-offset-4 decoration-white/40 min-w-0 break-all sm:break-normal">
+                <h3 className="text-[clamp(1.125rem,5.5vw,1.65rem)] leading-tight sm:text-4xl lg:text-5xl font-black tracking-tight tabular-nums group-hover:underline underline-offset-4 decoration-white/40 min-w-0 break-words sm:break-normal">
                   {formatCurrency(income, currency)}
                 </h3>
-                <Pencil
-                  aria-hidden="true"
-                  className="w-4 h-4 sm:w-5 sm:h-5 text-blue-100/80 group-hover:text-white transition-colors shrink-0"
-                />
+                <span className="p-1.5 sm:p-0 rounded-xl sm:rounded-none bg-white/20 sm:bg-transparent shrink-0">
+                  <Pencil
+                    aria-hidden="true"
+                    className="w-4 h-4 sm:w-5 sm:h-5 text-white sm:text-blue-100/80 sm:group-hover:text-white transition-colors"
+                  />
+                </span>
               </button>
             )}
 
-            {/* Dentro del mismo cartel, pero debajo: GASTOS VARIABLES en tamaño más chico */}
-            <div className="mt-5 pt-4 border-t border-white/20 bg-white/10 dark:bg-black/20 rounded-2xl p-4 sm:p-5 backdrop-blur-xs">
-              <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-                <span className="text-blue-100 text-2xs sm:text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-blue-200" />
-                  {t.variableExpenses}
-                </span>
-                <span className="bg-white/20 text-white text-2xs font-extrabold px-2.5 py-0.5 rounded-full backdrop-blur-xs">
-                  {remainingPercentage}{t.percentOfIncome}
-                </span>
-              </div>
-
-              <p className="text-xl sm:text-2xl lg:text-3xl font-black tracking-tight tabular-nums text-white mt-1">
-                {formatCurrency(monthlyRemaining, currency)}
-              </p>
-            </div>
-
-          </div>
-
-          <div className="mt-5 pt-3.5 border-t border-white/15 flex flex-wrap items-center justify-between gap-2 text-2xs sm:text-xs text-blue-100 relative z-10">
-            <span>{t.fixedExpensesLabel}: {fixedExpensesPercentage}%</span>
-            {savingsRate > 0 && <span>{t.savingsFixedLabel}: {formatSavingsPercent(savingsRate)}% ({formatCurrency(totalSavings, currency)})</span>}
-            <span>{t.monthDaysSummary}: {calcDetails.daysInMonth} {t.daysUnitPlural} ({calcDetails.extraDays} {t.extraDaysLabel.toLowerCase()})</span>
           </div>
 
           <div className="absolute -right-8 -bottom-8 w-48 h-48 bg-white/10 rounded-full blur-2xl pointer-events-none" />
@@ -332,9 +278,6 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                 <h4 className="text-base font-black text-slate-900 dark:text-white">
                   {t.savingsBarTitle}
                 </h4>
-                <span className="text-2xs font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                  {formatSavingsPercent(localSavingsRate)}% {t.savingsRateLabel}
-                </span>
               </div>
               <p className="col-span-2 text-[17px] leading-snug sm:text-2xs sm:leading-normal text-slate-500 dark:text-slate-400 sm:mt-0.5">
                 {language === 'es' ? t.savingsBarSubtitle.replace(/^Separa\b/, 'Separá') : t.savingsBarSubtitle}.
@@ -431,39 +374,48 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
 
         {/* Interactive Slider and Shortcuts */}
         <div className="space-y-2.5 pt-1">
-          <div className="hidden sm:flex items-center justify-between text-2xs font-bold text-slate-500 dark:text-slate-400">
-            <span>{t.noSavings}</span>
-            <span className="text-emerald-600 dark:text-emerald-400 font-black text-xs">
-              {formatSavingsPercent(localSavingsRate)}% = {formatCurrency(income > 0 ? (income * localSavingsRate) / 100 : 0, currency)}
-            </span>
-            <span>50%</span>
-          </div>
-
-          {/* Slider with dynamic green progress fill */}
-          <div className="flex items-center gap-2 sm:block">
-            <span className="sm:hidden text-2xs font-bold text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
+          {/* Slider with dynamic green progress fill (0% to 100%, 50% centered across all screen sizes) */}
+          <div className="flex items-center gap-2">
+            <span className="text-base font-bold text-slate-500 dark:text-slate-400 shrink-0 tabular-nums leading-none">
               0%
             </span>
             <div className="relative flex-1 w-full flex items-center py-1">
               {/* Background track & real-time green fill */}
-              <div className="absolute inset-x-0 h-6 sm:h-3 bg-slate-200 dark:bg-slate-700/80 rounded-full overflow-hidden pointer-events-none shadow-xs">
-                <div
-                  className="h-full bg-emerald-500 dark:bg-emerald-500 rounded-full transition-[width] duration-75 ease-out shadow-xs flex items-center justify-center overflow-hidden"
-                  style={{
-                    width: `${
-                      isMobile
-                        ? Math.min(100, Math.max(0, localSavingsRate))
-                        : Math.min(100, Math.max(0, (localSavingsRate / 50) * 100))
-                    }%`,
-                  }}
-                >
-                  {localSavingsRate > 0 && (
-                    <span className="sm:hidden text-[10px] font-black text-white leading-none whitespace-nowrap px-0.5 tabular-nums select-none">
-                      {formatSavingsPercent(localSavingsRate)}%
-                    </span>
-                  )}
-                </div>
-              </div>
+              {(() => {
+                const clampedRate = Math.min(100, Math.max(0, localSavingsRate));
+                const percentLabel = `${formatSavingsPercent(localSavingsRate)}%`;
+                return (
+                  <div className="absolute inset-x-0 h-6 bg-slate-200 dark:bg-slate-700/80 rounded-full overflow-hidden pointer-events-none shadow-xs">
+                    {/* Base centered percentage over track */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-base font-black text-slate-700 dark:text-slate-100 leading-none whitespace-nowrap tabular-nums select-none">
+                        {percentLabel}
+                      </span>
+                    </div>
+
+                    {/* Green fill bar */}
+                    <div
+                      className="h-full bg-emerald-500 dark:bg-emerald-500 rounded-full transition-[width] duration-75 ease-out shadow-xs"
+                      style={{
+                        width: `${clampedRate}%`,
+                      }}
+                    />
+
+                    {/* White centered percentage clipped to the green fill */}
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 flex items-center justify-center transition-[clip-path] duration-75 ease-out"
+                      style={{
+                        clipPath: `inset(0 ${100 - clampedRate}% 0 0)`,
+                      }}
+                    >
+                      <span className="text-base font-black text-white leading-none whitespace-nowrap tabular-nums select-none">
+                        {percentLabel}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Range input overlaid on top with pointer/touch commit handlers */}
               <input
@@ -485,11 +437,11 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                 onPointerUp={handleSliderCommit}
                 onTouchEnd={handleSliderCommit}
                 onMouseUp={handleSliderCommit}
-                className="relative z-10 w-full h-6 sm:h-4 appearance-none opacity-0 bg-transparent cursor-pointer focus:outline-none [&::-webkit-slider-runnable-track]:bg-transparent [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-1 [&::-webkit-slider-thumb]:h-6 [&::-moz-range-thumb]:w-1 [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:border-0 touch-pan-x"
+                className="relative z-10 w-full h-6 appearance-none opacity-0 bg-transparent cursor-pointer focus:outline-none [&::-webkit-slider-runnable-track]:bg-transparent [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-1 [&::-webkit-slider-thumb]:h-6 [&::-moz-range-thumb]:w-1 [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:border-0 touch-pan-x"
                 title={t.adjustSavingsSlider}
               />
             </div>
-            <span className="sm:hidden text-2xs font-bold text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
+            <span className="text-base font-bold text-slate-500 dark:text-slate-400 shrink-0 tabular-nums leading-none">
               100%
             </span>
           </div>
@@ -513,42 +465,6 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
             ))}
           </div>
         </div>
-      </div>
-
-      {/* Real-time Tracking & Pace Indicator Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 transition-colors shadow-xs">
-        
-        {/* Fixed Expenses Status */}
-        <div className="flex items-center gap-4 lg:gap-6 text-xs text-slate-600 dark:text-slate-400 flex-wrap">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>{t.paidFixedLabel} <strong className="text-slate-900 dark:text-white font-bold tabular-nums">{formatCurrency(paidFixedExpenses, currency)}</strong></span>
-          </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <Clock className="w-4 h-4 text-amber-500 shrink-0" />
-            <span>{t.pendingFixedLabel} <strong className="text-slate-900 dark:text-white font-bold tabular-nums">{formatCurrency(pendingFixedExpenses, currency)}</strong></span>
-          </div>
-        </div>
-
-        {/* Real Month Pace Alert (if current month is active) */}
-        {currentDay && (
-          <div className="flex items-center gap-2.5 sm:gap-3 text-xs justify-start sm:justify-end pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
-            <div className="flex items-center gap-1.5">
-              {isAheadOfPace ? (
-                <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-lg">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  {t.paceExcellentLabel.replace('{day}', String(currentDay)).replace('{total}', String(calcDetails.daysInMonth))}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-rose-700 dark:text-rose-300 font-bold bg-rose-50 dark:bg-rose-950/60 px-2.5 py-1 rounded-lg">
-                  <AlertCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                  {t.paceHighLabel}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
       </div>
 
     </div>
