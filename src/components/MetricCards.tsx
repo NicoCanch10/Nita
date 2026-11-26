@@ -58,10 +58,26 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   const [localSavingsRate, setLocalSavingsRate] = useState<number>(savingsRate);
   const throttleTimerRef = useRef<number | null>(null);
 
+  const maxSavingsAmount = Math.max(0, income);
+  const clampedSavingsRate = Math.min(100, Math.max(0, localSavingsRate));
+  const cappedSavingsInputAmount = Math.floor(Math.round(maxSavingsAmount * 1e6) / 1e4) / 100;
+
   // Sync external changes
   useEffect(() => {
-    setLocalSavingsRate(savingsRate);
+    setLocalSavingsRate(Math.min(100, Math.max(0, savingsRate)));
   }, [savingsRate]);
+
+  // Keep active edit input within the current month's net income ceiling if income changes
+  useEffect(() => {
+    if (!isEditingSavingsAmount) return;
+    const trimmed = tempSavingsAmount.trim();
+    if (trimmed === '') return;
+    const parsed = parseAmountInput(trimmed);
+    if (!isNaN(parsed) && parsed > maxSavingsAmount) {
+      setTempSavingsAmount(formatAmountForInput(cappedSavingsInputAmount, true));
+      setLocalSavingsRate(maxSavingsAmount > 0 ? 100 : 0);
+    }
+  }, [maxSavingsAmount, cappedSavingsInputAmount, isEditingSavingsAmount, tempSavingsAmount]);
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -80,14 +96,16 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   const computeRateFromSavingsAmount = (amountStr: string): number => {
     const trimmed = amountStr.trim();
     const parsed = trimmed === '' ? 0 : parseAmountInput(trimmed);
-    if (isNaN(parsed) || parsed <= 0 || income <= 0) return 0;
-    const clampedAmount = Math.min(income, parsed);
-    const rawRate = (clampedAmount / income) * 100;
+    if (isNaN(parsed) || parsed <= 0 || maxSavingsAmount <= 0) return 0;
+    const clampedAmount = Math.min(maxSavingsAmount, parsed);
+    const rawRate = (clampedAmount / maxSavingsAmount) * 100;
     return Math.max(0, Math.min(100, Math.round(rawRate * 1000000) / 1000000));
   };
 
   const handleStartEditSavingsAmount = () => {
-    const currentSaved = income > 0 ? (income * localSavingsRate) / 100 : 0;
+    const currentSaved = maxSavingsAmount > 0
+      ? Math.min(maxSavingsAmount, (maxSavingsAmount * clampedSavingsRate) / 100)
+      : 0;
     setTempSavingsAmount(formatAmountForInput(currentSaved, true));
     setIsEditingSavingsAmount(true);
   };
@@ -97,10 +115,20 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
     const raw = inputEl.value;
     const caret = inputEl.selectionStart;
     const nextFormatted = formatAmountInputValue(raw, tempSavingsAmount);
-    const nextCaret = computeFormattedCaretIndex(raw, caret, nextFormatted);
-    setTempSavingsAmount(nextFormatted);
+    const trimmed = nextFormatted.trim();
+    const parsed = trimmed === '' ? 0 : parseAmountInput(trimmed);
 
-    const previewRate = computeRateFromSavingsAmount(nextFormatted);
+    let finalFormatted = nextFormatted;
+    let nextCaret = computeFormattedCaretIndex(raw, caret, nextFormatted);
+
+    if (trimmed !== '' && !isNaN(parsed) && parsed > maxSavingsAmount) {
+      finalFormatted = formatAmountForInput(cappedSavingsInputAmount, true);
+      nextCaret = finalFormatted.length;
+    }
+
+    setTempSavingsAmount(finalFormatted);
+
+    const previewRate = computeRateFromSavingsAmount(finalFormatted);
     setLocalSavingsRate(previewRate);
 
     if (nextCaret !== null && typeof requestAnimationFrame !== 'undefined') {
@@ -125,7 +153,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   };
 
   const handleCancelSavingsAmountEdit = () => {
-    setLocalSavingsRate(savingsRate);
+    setLocalSavingsRate(Math.min(100, Math.max(0, savingsRate)));
     setIsEditingSavingsAmount(false);
   };
 
@@ -193,7 +221,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
       
       {/* Primary KPI Card: INGRESO NETO MENSUAL (con edición) */}
       <div>
-        <div className="bg-linear-to-br from-blue-700 via-blue-600 to-indigo-800 text-white p-5 sm:p-7 rounded-3xl shadow-sm relative overflow-hidden flex flex-col justify-between">
+        <div className="bg-linear-to-br from-blue-700 via-blue-600 to-indigo-800 text-white px-5 py-7 sm:px-8 sm:py-10 min-h-[144px] sm:min-h-[180px] rounded-3xl shadow-sm relative overflow-hidden flex flex-col justify-center">
           <div className="relative z-10">
             
             {/* Header: Ingreso Neto Mensual Title */}
@@ -269,33 +297,16 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
       {/* Barra de AHORRO Reincorporada */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs transition-colors space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-5">
-          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2.5 gap-y-2 sm:flex sm:items-center sm:gap-3 sm:flex-initial min-w-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 sm:flex-initial min-w-0">
             <div className="p-2 sm:p-2.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-xl sm:rounded-2xl shadow-2xs shrink-0">
               <PiggyBank className="w-5 h-5" />
             </div>
-            <div className="contents sm:block sm:flex-1 sm:min-w-0">
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <h4 className="text-base font-black text-slate-900 dark:text-white">
                   {t.savingsBarTitle}
                 </h4>
               </div>
-              <p className="col-span-2 text-[17px] leading-snug sm:text-2xs sm:leading-normal text-slate-500 dark:text-slate-400 sm:mt-0.5">
-                {language === 'es' ? t.savingsBarSubtitle.replace(/^Separa\b/, 'Separá') : t.savingsBarSubtitle}.
-                <br />
-                {language === 'en'
-                  ? 'Enter your desired amount or use any of the shortcuts.'
-                  : language === 'ca'
-                  ? "Introdueix l'import desitjat o utilitza alguna de les dreceres."
-                  : language === 'pt'
-                  ? 'Digite o valor desejado ou utilize algum dos atalhos.'
-                  : language === 'fr'
-                  ? "Saisissez le montant souhaité ou utilisez l'un des raccourcis."
-                  : language === 'it'
-                  ? "Inserisci l'importo desiderato o utilizza una delle scorciatoie."
-                  : language === 'de'
-                  ? 'Gib den gewünschten Betrag ein oder nutze eine der Verknüpfungen.'
-                  : 'Introducí el monto deseado ó utilizá alguno de los atajos.'}
-              </p>
             </div>
           </div>
 
@@ -343,13 +354,13 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-                {income <= 0 ? (
+                {maxSavingsAmount <= 0 ? (
                   <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
                     {t.netIncome}: {formatCurrency(0, currency)}
                   </span>
                 ) : (
                   <span className="text-[11px] font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">
-                    = {formatSavingsPercent(localSavingsRate)}% {t.savingsRateLabel}
+                    = {formatSavingsPercent(clampedSavingsRate)}% {t.savingsRateLabel}
                   </span>
                 )}
               </form>
@@ -365,7 +376,12 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
                   <Pencil className="w-3 h-3 text-emerald-600/70 dark:text-emerald-400/70 group-hover:text-emerald-600 dark:group-hover:text-emerald-300 transition-colors shrink-0" />
                 </span>
                 <span className="text-lg sm:text-xl font-black text-emerald-700 dark:text-emerald-300 tabular-nums block text-center mt-0.5 group-hover:underline underline-offset-4 decoration-emerald-500/40">
-                  {formatCurrency(income > 0 ? (income * localSavingsRate) / 100 : 0, currency)}
+                  {formatCurrency(
+                    maxSavingsAmount > 0
+                      ? Math.min(maxSavingsAmount, (maxSavingsAmount * clampedSavingsRate) / 100)
+                      : 0,
+                    currency
+                  )}
                 </span>
               </button>
             )}

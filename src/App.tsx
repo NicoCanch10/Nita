@@ -196,7 +196,7 @@ function MainApp() {
       const anchorEl = sectionStartRef.current;
 
       const stickyTopOffset = isDesktopTabsVisible
-        ? headerHeight + 8 + desktopTabsHeight + 24
+        ? headerHeight + desktopTabsHeight + 24
         : headerHeight + 24;
 
       const rawTargetTop = anchorEl
@@ -1811,15 +1811,15 @@ function MainApp() {
       </div>
 
       {/* Main Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-28 sm:pb-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-0 pb-28 sm:pb-6 space-y-6">
         
 
 
         {/* Desktop Navigation Tabs Bar (Visible únicamente en pantallas medianas y de escritorio: sm en adelante, fija al desplazarse) */}
         <div
           ref={desktopTabsRef}
-          style={{ top: `${stickyHeaderHeight + 8}px` }}
-          className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 sm:sticky z-20 gap-1.5 p-1.5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-800 rounded-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm transition-colors"
+          style={{ top: `${stickyHeaderHeight}px` }}
+          className="hidden sm:grid sm:grid-cols-3 lg:grid-cols-5 sm:sticky z-20 gap-1.5 p-1.5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-t-0 border-slate-200 dark:border-slate-800 rounded-b-2xl w-full text-xs font-bold text-slate-600 dark:text-slate-300 shadow-sm transition-colors"
         >
           <button
             type="button"

@@ -24,6 +24,9 @@ import {
   ArrowRight,
   ArrowDown,
   Lightbulb,
+  PiggyBank,
+  PieChart,
+  Calculator,
 } from 'lucide-react';
 import { JarIcon } from './JarIcon';
 import { getTranslations } from '../utils/languages';
@@ -337,7 +340,31 @@ const STEPS: StepInfo[] = [
   },
   {
     id: 2,
-    tabLabel: '2. Vencimientos',
+    tabLabel: '2. Ahorro',
+    icon: PiggyBank,
+    title: 'Separá primero tu ahorro mensual',
+    description: 'Separá un porcentaje de ahorro antes de dividir los gastos variables. Introducí el monto deseado o utilizá alguno de los atajos.',
+    highlights: [
+      {
+        title: 'Tres formas de definir tu ahorro',
+        desc: 'Deslizá la barra verde (0% a 100%), tocá alguno de los atajos rápidos o hacé clic en «Monto ahorrado» para escribir el importe exacto.',
+        icon: PiggyBank,
+      },
+      {
+        title: 'Límite del 100% según tu ingreso',
+        desc: 'El máximo (100%) corresponde al ingreso neto mensual del mes activo, por lo que el ahorro nunca puede superar ese valor.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Impacto en tus Gastos Variables',
+        desc: 'El monto que apartes se descuenta automáticamente antes de repartir el presupuesto restante entre los 5 frascos.',
+        icon: Check,
+      },
+    ],
+  },
+  {
+    id: 3,
+    tabLabel: '3. Vencimientos',
     icon: Receipt,
     title: 'Organizá tus compromisos mensuales',
     description: 'Registrá tus gastos fijos para descontarlos de tu ingreso y controlar cada fecha de pago.',
@@ -361,8 +388,8 @@ const STEPS: StepInfo[] = [
     tip: 'Si tus compromisos se repiten mes a mes, podés usar «Copiar del mes anterior» al pie de la pantalla.',
   },
   {
-    id: 3,
-    tabLabel: '3. Los 5 Frascos',
+    id: 4,
+    tabLabel: '4. Los 5 Frascos',
     icon: JarIcon,
     title: 'Conocé cómo NITA organiza tu presupuesto',
     description: 'El presupuesto disponible para gastos variables se divide en 5 frascos según el calendario real del mes.',
@@ -390,8 +417,8 @@ const STEPS: StepInfo[] = [
     ],
   },
   {
-    id: 4,
-    tabLabel: '4. Gastos Diarios',
+    id: 5,
+    tabLabel: '5. Gastos Diarios',
     icon: ShoppingBag,
     title: 'Registrá tus consumos cotidianos',
     description: 'Anotá tus compras diarias para descontarlas del frasco de su semana y seguir tu saldo.',
@@ -415,23 +442,36 @@ const STEPS: StepInfo[] = [
     tip: 'Podés cargar consumos de días anteriores eligiendo su fecha exacta para mantener tus frascos al día.',
   },
   {
-    id: 5,
-    tabLabel: '5. Ajustes y App',
+    id: 6,
+    tabLabel: '6. Diagnóstico y Simulador',
+    icon: PieChart,
+    title: 'Evaluá tu mes y simulá escenarios',
+    description: 'Revisá el equilibrio 50/30/20 de tu presupuesto, la composición de tu dinero y probá cambios sin modificar tus datos reales.',
+    highlights: [
+      {
+        title: 'Tres pilares y regla 50 / 30 / 20',
+        desc: 'Compará qué porcentaje de tu ingreso va a Gastos Fijos (ideal ≤ 50%), cuánto queda para Variables (~30%) y tu objetivo de Ahorro.',
+        icon: PieChart,
+      },
+      {
+        title: 'Gráfico de composición de tu dinero',
+        desc: 'Visualizá en un gráfico de torta interactivo cómo se reparte tu ingreso entre fijos, variables y ahorro. Pasá el cursor para resaltar cada parte.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Simulador «¿Qué pasa si...?»',
+        desc: 'Mové las barras para simular un recorte de gastos fijos o un ingreso extra y ver al instante tu nuevo presupuesto y ganancia diaria, sin alterar tu mes real.',
+        icon: Calculator,
+      },
+    ],
+  },
+  {
+    id: 7,
+    tabLabel: '7. Ajustes y App',
     icon: Settings,
     title: 'Personalizá NITA a tu manera',
     description: 'Desde la rueda de configuraciones (⚙️) adaptás la apariencia, alertas y preferencias de la aplicación.',
-    highlights: [
-      {
-        title: 'Tema, idioma y moneda',
-        desc: 'Alterná entre Modo Blanco y Modo Oscuro, elegí entre los 7 idiomas disponibles y seleccioná tu formato de moneda.',
-        icon: Globe,
-      },
-      {
-        title: 'Avisos, instalación y actualizaciones',
-        desc: 'Configurá tus avisos de vencimiento, instalá NITA en dispositivos compatibles y buscá o aplicá actualizaciones cuando estén disponibles.',
-        icon: Smartphone,
-      },
-    ],
+    highlights: [],
   },
 ];
 
@@ -462,7 +502,31 @@ const STEPS_EN: StepInfo[] = [
   },
   {
     id: 2,
-    tabLabel: '2. Due Dates',
+    tabLabel: '2. Savings',
+    icon: PiggyBank,
+    title: 'Set aside your monthly savings first',
+    description: 'Set aside a savings percentage before dividing variable expenses. Enter your desired amount or use any of the shortcuts.',
+    highlights: [
+      {
+        title: 'Three ways to set your savings',
+        desc: 'Drag the green bar (0% to 100%), tap any quick shortcut, or tap “Saved amount” to type an exact figure.',
+        icon: PiggyBank,
+      },
+      {
+        title: '100% ceiling based on your income',
+        desc: 'The 100% maximum equals your active month’s net income, so savings can never exceed that amount.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Impact on Variable Expenses',
+        desc: 'The amount you set aside is deducted automatically before splitting the remaining budget across the 5 jars.',
+        icon: Check,
+      },
+    ],
+  },
+  {
+    id: 3,
+    tabLabel: '3. Due Dates',
     icon: Receipt,
     title: 'Organize your monthly commitments',
     description: 'Record recurring bills so they are deducted from your income and tracked by due date.',
@@ -486,8 +550,8 @@ const STEPS_EN: StepInfo[] = [
     tip: 'If your commitments repeat each month, use “Copy from previous month” at the bottom to preload them quickly.',
   },
   {
-    id: 3,
-    tabLabel: '3. The 5 Jars',
+    id: 4,
+    tabLabel: '4. The 5 Jars',
     icon: JarIcon,
     title: 'See how NITA organizes your budget',
     description: 'Your remaining variable budget is divided into 5 jars tailored to the real calendar of the month.',
@@ -515,8 +579,8 @@ const STEPS_EN: StepInfo[] = [
     ],
   },
   {
-    id: 4,
-    tabLabel: '4. Daily Expenses',
+    id: 5,
+    tabLabel: '5. Daily Expenses',
     icon: ShoppingBag,
     title: 'Record your everyday purchases',
     description: 'Log daily spending so it deducts from the matching weekly jar and keeps your balance current.',
@@ -540,23 +604,36 @@ const STEPS_EN: StepInfo[] = [
     tip: 'You can log purchases from earlier days by picking their exact date so every jar stays accurate.',
   },
   {
-    id: 5,
-    tabLabel: '5. Settings & App',
+    id: 6,
+    tabLabel: '6. Diagnosis & Simulator',
+    icon: PieChart,
+    title: 'Review your month and simulate scenarios',
+    description: 'Check your 50/30/20 balance, money composition pie chart, and test what-if changes without altering your real data.',
+    highlights: [
+      {
+        title: 'Three pillars & 50 / 30 / 20 rule',
+        desc: 'Compare the share of income going to Fixed Expenses (ideal ≤ 50%), Variable budget (~30%), and your Savings target.',
+        icon: PieChart,
+      },
+      {
+        title: 'Money composition pie chart',
+        desc: 'See how your income splits across fixed, variable, and savings in an interactive pie chart. Hover any slice or row to highlight it.',
+        icon: ShieldCheck,
+      },
+      {
+        title: '“What if...” Simulator',
+        desc: 'Slide the controls to test cutting fixed expenses or adding extra income and instantly see your new budget and daily gain.',
+        icon: Calculator,
+      },
+    ],
+  },
+  {
+    id: 7,
+    tabLabel: '7. Settings & App',
     icon: Settings,
     title: 'Customize NITA your way',
     description: 'From the settings wheel (⚙️), tailor appearance, alerts, language, and app preferences.',
-    highlights: [
-      {
-        title: 'Theme, language, and currency',
-        desc: 'Switch between Light Mode and Dark Mode, choose from 7 languages, and pick your currency format.',
-        icon: Globe,
-      },
-      {
-        title: 'Alerts, install, and updates',
-        desc: 'Configure due date alerts, install NITA on supported devices, and check or apply updates when available.',
-        icon: Smartphone,
-      },
-    ],
+    highlights: [],
   },
 ];
 
@@ -587,7 +664,31 @@ const STEPS_CA: StepInfo[] = [
   },
   {
     id: 2,
-    tabLabel: '2. Venciments',
+    tabLabel: '2. Estalvi',
+    icon: PiggyBank,
+    title: 'Separa primer el teu estalvi mensual',
+    description: 'Separa un percentatge d’estalvi abans de dividir les despeses variables. Introdueix l’import desitjat o utilitza alguna de les dreceres.',
+    highlights: [
+      {
+        title: 'Tres maneres de definir el teu estalvi',
+        desc: 'Llisca la barra verda (0% a 100%), toca alguna de les dreceres ràpides o fes clic a «Import estalviat» per escriure l’import exacte.',
+        icon: PiggyBank,
+      },
+      {
+        title: 'Límit del 100% segons el teu ingrés',
+        desc: 'El màxim (100%) correspon a l’ingrés net mensual del mes actiu, de manera que l’estalvi mai no pot superar aquest valor.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Impacte en les Despeses Variables',
+        desc: 'L’import que apartis es descompta automàticament abans de repartir el pressupost restant entre els 5 pots.',
+        icon: Check,
+      },
+    ],
+  },
+  {
+    id: 3,
+    tabLabel: '3. Venciments',
     icon: Receipt,
     title: 'Organitza els teus compromisos mensuals',
     description: 'Registra els teus pagaments recurrents per descomptar-los de l’ingrés i controlar cada venciment.',
@@ -611,8 +712,8 @@ const STEPS_CA: StepInfo[] = [
     tip: 'Si els compromisos es repeteixen cada mes, pots usar «Copiar del mes anterior» al peu de la pantalla.',
   },
   {
-    id: 3,
-    tabLabel: '3. Els 5 Pots',
+    id: 4,
+    tabLabel: '4. Els 5 Pots',
     icon: JarIcon,
     title: 'Coneix com NITA organitza el teu pressupost',
     description: 'El pressupost disponible per a despeses variables es divideix en 5 pots segons el calendari real del mes.',
@@ -640,8 +741,8 @@ const STEPS_CA: StepInfo[] = [
     ],
   },
   {
-    id: 4,
-    tabLabel: '4. Despeses Diàries',
+    id: 5,
+    tabLabel: '5. Despeses Diàries',
     icon: ShoppingBag,
     title: 'Registra els teus consums quotidians',
     description: 'Apunta les teves compres diàries per descomptar-les del pot de la seva setmana i seguir el saldo.',
@@ -665,23 +766,36 @@ const STEPS_CA: StepInfo[] = [
     tip: 'Pots registrar compres de dies anteriors triant la data exacta per mantenir els pots al dia.',
   },
   {
-    id: 5,
-    tabLabel: '5. Ajustos i App',
+    id: 6,
+    tabLabel: '6. Diagnòstic i Simulador',
+    icon: PieChart,
+    title: 'Avalua el mes i simula escenaris',
+    description: 'Consulta l’equilibri 50/30/20 del pressupost, la composició dels teus diners i prova canvis sense modificar les dades reals.',
+    highlights: [
+      {
+        title: 'Tres pilars i regla 50 / 30 / 20',
+        desc: 'Compara quin percentatge va a Despeses Fixes (ideal ≤ 50%), quant queda per a Variables (~30%) i el teu objectiu d’Estalvi.',
+        icon: PieChart,
+      },
+      {
+        title: 'Gràfic de composició dels diners',
+        desc: 'Visualitza en un gràfic de pastís interactiu com es reparteix el teu ingrés entre fixes, variables i estalvi.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Simulador «Què passa si...?»',
+        desc: 'Mou els controls per simular una reducció de despeses fixes o un ingrés extra i veure a l’instant el guany diari estimat.',
+        icon: Calculator,
+      },
+    ],
+  },
+  {
+    id: 7,
+    tabLabel: '7. Ajustos i App',
     icon: Settings,
     title: 'Personalitza NITA a la teva manera',
     description: 'Des de la roda de configuracions (⚙️) adaptes l’aparença, alertes i preferències de l’aplicació.',
-    highlights: [
-      {
-        title: 'Tema, idioma i moneda',
-        desc: 'Alterna entre Mode Blanc i Mode Fosc, tria entre els 7 idiomes disponibles i selecciona el format de moneda.',
-        icon: Globe,
-      },
-      {
-        title: 'Avisos, instal·lació i actualitzacions',
-        desc: 'Configura els avisos de venciment, instal·la NITA en dispositius compatibles i cerca o aplica actualitzacions disponibles.',
-        icon: Smartphone,
-      },
-    ],
+    highlights: [],
   },
 ];
 
@@ -712,7 +826,31 @@ const STEPS_PT: StepInfo[] = [
   },
   {
     id: 2,
-    tabLabel: '2. Vencimentos',
+    tabLabel: '2. Poupança',
+    icon: PiggyBank,
+    title: 'Separe primeiro sua poupança mensal',
+    description: 'Reserve uma porcentagem de poupança antes de dividir as despesas variáveis. Digite o valor desejado ou utilize algum dos atalhos.',
+    highlights: [
+      {
+        title: 'Três formas de definir sua poupança',
+        desc: 'Deslize a barra verde (0% a 100%), toque em um dos atalhos rápidos ou clique em «Valor poupado» para digitar o valor exato.',
+        icon: PiggyBank,
+      },
+      {
+        title: 'Limite de 100% conforme sua renda',
+        desc: 'O máximo (100%) corresponde à renda líquida mensal do mês ativo, garantindo que a poupança nunca ultrapasse esse valor.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Impacto nos Gastos Variáveis',
+        desc: 'O valor reservado é descontado automaticamente antes de dividir o orçamento restante entre os 5 potes.',
+        icon: Check,
+      },
+    ],
+  },
+  {
+    id: 3,
+    tabLabel: '3. Vencimentos',
     icon: Receipt,
     title: 'Organize seus compromissos mensais',
     description: 'Registre seus gastos fixos para descontá-los da renda e acompanhar cada data de vencimento.',
@@ -736,8 +874,8 @@ const STEPS_PT: StepInfo[] = [
     tip: 'Se os compromissos se repetem todo mês, use «Copiar do mês anterior» no rodapé da tela.',
   },
   {
-    id: 3,
-    tabLabel: '3. Os 5 Potes',
+    id: 4,
+    tabLabel: '4. Os 5 Potes',
     icon: JarIcon,
     title: 'Conheça como o NITA organiza seu orçamento',
     description: 'O orçamento disponível para gastos variáveis é dividido em 5 potes conforme o calendário real do mês.',
@@ -765,8 +903,8 @@ const STEPS_PT: StepInfo[] = [
     ],
   },
   {
-    id: 4,
-    tabLabel: '4. Gastos Diários',
+    id: 5,
+    tabLabel: '5. Gastos Diários',
     icon: ShoppingBag,
     title: 'Registre seus consumos do dia a dia',
     description: 'Anote suas compras diárias para descontar do pote da semana correspondente e acompanhar seu saldo.',
@@ -790,23 +928,36 @@ const STEPS_PT: StepInfo[] = [
     tip: 'Você pode registrar compras de dias anteriores escolhendo a data exata para manter seus potes atualizados.',
   },
   {
-    id: 5,
-    tabLabel: '5. Ajustes e App',
+    id: 6,
+    tabLabel: '6. Diagnóstico e Simulador',
+    icon: PieChart,
+    title: 'Avalie seu mês e simule cenários',
+    description: 'Confira o equilíbrio 50/30/20, a composição do seu dinheiro e teste mudanças sem alterar seus dados reais.',
+    highlights: [
+      {
+        title: 'Três pilares e regra 50 / 30 / 20',
+        desc: 'Compare a fatia da renda destinada a Gastos Fixos (ideal ≤ 50%), o saldo para Variáveis (~30%) e sua meta de Poupança.',
+        icon: PieChart,
+      },
+      {
+        title: 'Gráfico de composição do dinheiro',
+        desc: 'Veja em um gráfico de pizza interativo como sua renda se divide entre fixos, variáveis e poupança.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Simulador «E se...?»',
+        desc: 'Mova os controles para simular corte de gastos fixos ou renda extra e confira na hora seu novo orçamento e ganho diário.',
+        icon: Calculator,
+      },
+    ],
+  },
+  {
+    id: 7,
+    tabLabel: '7. Ajustes e App',
     icon: Settings,
     title: 'Personalize o NITA do seu jeito',
     description: 'Pela roda de configurações (⚙️) você ajusta visual, idioma, moeda, alertas e opções do aplicativo.',
-    highlights: [
-      {
-        title: 'Tema, idioma e moeda',
-        desc: 'Alterne entre Modo Claro e Modo Escuro, escolha entre 7 idiomas e selecione seu formato de moeda.',
-        icon: Globe,
-      },
-      {
-        title: 'Alertas, instalação e atualizações',
-        desc: 'Configure avisos de vencimento, instale o NITA em dispositivos compatíveis e busque ou aplique atualizações disponíveis.',
-        icon: Smartphone,
-      },
-    ],
+    highlights: [],
   },
 ];
 
@@ -837,7 +988,31 @@ const STEPS_FR: StepInfo[] = [
   },
   {
     id: 2,
-    tabLabel: '2. Échéances',
+    tabLabel: '2. Épargne',
+    icon: PiggyBank,
+    title: 'Mettez d’abord votre épargne de côté',
+    description: 'Mettez de côté un pourcentage d’épargne avant de répartir les dépenses variables. Saisissez le montant souhaité ou utilisez l’un des raccourcis.',
+    highlights: [
+      {
+        title: 'Trois façons de définir votre épargne',
+        desc: 'Faites glisser la barre verte (0 % à 100 %), touchez l’un des raccourcis rapides ou cliquez sur « Montant épargné » pour saisir un montant exact.',
+        icon: PiggyBank,
+      },
+      {
+        title: 'Plafond à 100 % selon votre revenu',
+        desc: 'Le maximum (100 %) correspond au revenu net mensuel du mois en cours ; l’épargne ne peut donc jamais le dépasser.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Impact sur les Dépenses Variables',
+        desc: 'Le montant réservé est automatiquement déduit avant de répartir le budget restant entre les 5 bocaux.',
+        icon: Check,
+      },
+    ],
+  },
+  {
+    id: 3,
+    tabLabel: '3. Échéances',
     icon: Receipt,
     title: 'Organisez vos engagements mensuels',
     description: 'Enregistrez vos paiements récurrents pour les déduire du revenu et suivre chaque échéance.',
@@ -861,8 +1036,8 @@ const STEPS_FR: StepInfo[] = [
     tip: 'Si vos charges se répètent chaque mois, utilisez « Copier du mois précédent » en bas de l’écran.',
   },
   {
-    id: 3,
-    tabLabel: '3. Les 5 Bocaux',
+    id: 4,
+    tabLabel: '4. Les 5 Bocaux',
     icon: JarIcon,
     title: 'Découvrez comment NITA organise votre budget',
     description: 'Votre budget disponible pour les dépenses variables est réparti en 5 bocaux selon le calendrier réel du mois.',
@@ -890,8 +1065,8 @@ const STEPS_FR: StepInfo[] = [
     ],
   },
   {
-    id: 4,
-    tabLabel: '4. Dépenses Quotidiennes',
+    id: 5,
+    tabLabel: '5. Dépenses Quotidiennes',
     icon: ShoppingBag,
     title: 'Enregistrez vos achats quotidiens',
     description: 'Notez vos dépenses de tous les jours pour les déduire du bocal de la semaine correspondante.',
@@ -915,23 +1090,36 @@ const STEPS_FR: StepInfo[] = [
     tip: 'Vous pouvez saisir un achat passé en choisissant sa date exacte afin de garder vos bocaux à jour.',
   },
   {
-    id: 5,
-    tabLabel: '5. Paramètres & App',
+    id: 6,
+    tabLabel: '6. Diagnostic & Simulateur',
+    icon: PieChart,
+    title: 'Analysez votre mois et simulez',
+    description: 'Vérifiez l’équilibre 50/30/20, la répartition de votre budget et testez des scénarios sans toucher à vos données réelles.',
+    highlights: [
+      {
+        title: 'Trois piliers et règle 50 / 30 / 20',
+        desc: 'Comparez la part dédiée aux Dépenses Fixes (idéal ≤ 50 %), aux Dépenses Variables (~30 %) et à votre Épargne.',
+        icon: PieChart,
+      },
+      {
+        title: 'Graphique de composition du budget',
+        desc: 'Visualisez dans un diagramme circulaire interactif la part des dépenses fixes, variables et de l’épargne.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Simulateur « Et si... ? »',
+        desc: 'Simulez une baisse de charges fixes ou un revenu supplémentaire pour voir instantanément votre gain quotidien.',
+        icon: Calculator,
+      },
+    ],
+  },
+  {
+    id: 7,
+    tabLabel: '7. Paramètres & App',
     icon: Settings,
     title: 'Personnalisez NITA à votre façon',
     description: 'Depuis la roue des paramètres (⚙️), adaptez l’apparence, les alertes, la langue et l’application.',
-    highlights: [
-      {
-        title: 'Thème, langue et devise',
-        desc: 'Passez du Mode Clair au Mode Sombre, choisissez parmi 7 langues et sélectionnez votre format de devise.',
-        icon: Globe,
-      },
-      {
-        title: 'Alertes, installation et mises à jour',
-        desc: 'Réglez vos alertes d’échéance, installez NITA sur appareil compatible et vérifiez ou appliquez les mises à jour disponibles.',
-        icon: Smartphone,
-      },
-    ],
+    highlights: [],
   },
 ];
 
@@ -962,7 +1150,31 @@ const STEPS_IT: StepInfo[] = [
   },
   {
     id: 2,
-    tabLabel: '2. Scadenze',
+    tabLabel: '2. Risparmio',
+    icon: PiggyBank,
+    title: 'Accantona prima il tuo risparmio mensile',
+    description: 'Accantona una percentuale di risparmio prima di suddividere le spese variabili. Inserisci l’importo desiderato o utilizza una delle scorciatoie.',
+    highlights: [
+      {
+        title: 'Tre modi per definire il risparmio',
+        desc: 'Scorri la barra verde (0% a 100%), tocca una delle scorciatoie rapide o clicca su «Importo risparmiato» per scrivere la cifra esatta.',
+        icon: PiggyBank,
+      },
+      {
+        title: 'Limite del 100% in base al reddito',
+        desc: 'Il massimo (100%) corrisponde al reddito netto mensile del mese attivo, quindi il risparmio non può mai superarlo.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Impatto sulle Spese Variabili',
+        desc: 'L’importo accantonato viene detratto automaticamente prima di dividere il budget residuo nei 5 barattoli.',
+        icon: Check,
+      },
+    ],
+  },
+  {
+    id: 3,
+    tabLabel: '3. Scadenze',
     icon: Receipt,
     title: 'Organizza i tuoi impegni mensili',
     description: 'Registra le spese fisse per detrarle dal reddito e tenere sotto controllo ogni scadenza.',
@@ -986,8 +1198,8 @@ const STEPS_IT: StepInfo[] = [
     tip: 'Se gli impegni si ripetono ogni mese, usa «Copia dal mese precedente» in fondo alla pagina.',
   },
   {
-    id: 3,
-    tabLabel: '3. I 5 Barattoli',
+    id: 4,
+    tabLabel: '4. I 5 Barattoli',
     icon: JarIcon,
     title: 'Scopri come NITA organizza il tuo budget',
     description: 'Il budget disponibile per le spese variabili viene suddiviso in 5 barattoli secondo il calendario reale del mese.',
@@ -1015,8 +1227,8 @@ const STEPS_IT: StepInfo[] = [
     ],
   },
   {
-    id: 4,
-    tabLabel: '4. Spese Giornaliere',
+    id: 5,
+    tabLabel: '5. Spese Giornaliere',
     icon: ShoppingBag,
     title: 'Registra i tuoi consumi quotidiani',
     description: 'Annota gli acquisti di ogni giorno per scalarli dal barattolo della rispettiva settimana.',
@@ -1040,23 +1252,36 @@ const STEPS_IT: StepInfo[] = [
     tip: 'Puoi registrare acquisti di giorni precedenti selezionando la data esatta per mantenere i barattoli aggiornati.',
   },
   {
-    id: 5,
-    tabLabel: '5. Impostazioni & App',
+    id: 6,
+    tabLabel: '6. Diagnosi e Simulatore',
+    icon: PieChart,
+    title: 'Analizza il mese e simula scenari',
+    description: 'Controlla l’equilibrio 50/30/20, la composizione del tuo denaro e prova cambiamenti senza modificare i dati reali.',
+    highlights: [
+      {
+        title: 'Tre pilastri e regola 50 / 30 / 20',
+        desc: 'Confronta la quota destinata alle Spese Fisse (ideale ≤ 50%), alle Spese Variabili (~30%) e al tuo Risparmio.',
+        icon: PieChart,
+      },
+      {
+        title: 'Grafico di composizione del denaro',
+        desc: 'Osserva in un grafico a torta interattivo come si suddivide il reddito tra spese fisse, variabili e risparmio.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Simulatore «Cosa succede se...?»',
+        desc: 'Muovi i cursori per simulare un taglio alle spese fisse o un’entrata extra e vedere subito il guadagno giornaliero.',
+        icon: Calculator,
+      },
+    ],
+  },
+  {
+    id: 7,
+    tabLabel: '7. Impostazioni & App',
     icon: Settings,
     title: 'Personalizza NITA a modo tuo',
     description: 'Dalla rotella delle impostazioni (⚙️) adatti aspetto, lingua, avvisi e opzioni dell’app.',
-    highlights: [
-      {
-        title: 'Tema, lingua e valuta',
-        desc: 'Passa da Tema Chiaro a Tema Scuro, scegli tra 7 lingue disponibili e seleziona il formato della valuta.',
-        icon: Globe,
-      },
-      {
-        title: 'Avvisi, installazione e aggiornamenti',
-        desc: 'Configura gli avvisi di scadenza, installa NITA sui dispositivi compatibili e cerca o applica aggiornamenti disponibili.',
-        icon: Smartphone,
-      },
-    ],
+    highlights: [],
   },
 ];
 
@@ -1087,7 +1312,31 @@ const STEPS_DE: StepInfo[] = [
   },
   {
     id: 2,
-    tabLabel: '2. Fälligkeiten',
+    tabLabel: '2. Sparen',
+    icon: PiggyBank,
+    title: 'Legen Sie zuerst Ihre monatliche Ersparnis fest',
+    description: 'Lege eine Sparquote zurück, bevor du variable Ausgaben aufteilst. Gib den gewünschten Betrag ein oder nutze eine der Verknüpfungen.',
+    highlights: [
+      {
+        title: 'Drei Wege für Ihre Sparquote',
+        desc: 'Ziehen Sie den grünen Balken (0 % bis 100 %), nutzen Sie die Schnell-Buttons oder tippen Sie auf „Gesparter Betrag“ für einen genauen Wert.',
+        icon: PiggyBank,
+      },
+      {
+        title: '100-%-Obergrenze nach Nettoeinkommen',
+        desc: 'Das Maximum (100 %) entspricht dem Nettoeinkommen des jeweiligen Monats – die Ersparnis kann diesen Wert nie überschreiten.',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Auswirkung auf variable Ausgaben',
+        desc: 'Der zurückgelegte Betrag wird automatisch abgezogen, bevor das Restbudget auf die 5 Gläser verteilt wird.',
+        icon: Check,
+      },
+    ],
+  },
+  {
+    id: 3,
+    tabLabel: '3. Fälligkeiten',
     icon: Receipt,
     title: 'Organisieren Sie Ihre monatlichen Fixkosten',
     description: 'Erfassen Sie wiederkehrende Zahlungen, um sie direkt abzuziehen und Termine im Blick zu behalten.',
@@ -1111,8 +1360,8 @@ const STEPS_DE: StepInfo[] = [
     tip: 'Wiederkehrende Ausgaben lassen sich unten auf der Seite mit „Vom Vormonat kopieren“ schnell übernehmen.',
   },
   {
-    id: 3,
-    tabLabel: '3. Die 5 Gläser',
+    id: 4,
+    tabLabel: '4. Die 5 Gläser',
     icon: JarIcon,
     title: 'So strukturiert NITA Ihr Budget',
     description: 'Das Budget für variable Ausgaben wird anhand des echten Monatskalenders auf 5 Gläser verteilt.',
@@ -1140,8 +1389,8 @@ const STEPS_DE: StepInfo[] = [
     ],
   },
   {
-    id: 4,
-    tabLabel: '4. Tägliche Ausgaben',
+    id: 5,
+    tabLabel: '5. Tägliche Ausgaben',
     icon: ShoppingBag,
     title: 'Erfassen Sie Ihre täglichen Ausgaben',
     description: 'Notieren Sie alltägliche Einkäufe, damit sie automatisch vom passenden Wochenglas abgezogen werden.',
@@ -1165,23 +1414,36 @@ const STEPS_DE: StepInfo[] = [
     tip: 'Auch frühere Einkäufe lassen sich mit ihrem genauen Datum erfassen, damit jedes Glas aktuell bleibt.',
   },
   {
-    id: 5,
-    tabLabel: '5. Einstellungen & App',
+    id: 6,
+    tabLabel: '6. Diagnose & Simulator',
+    icon: PieChart,
+    title: 'Monat prüfen & Szenarien simulieren',
+    description: 'Prüfen Sie die 50/30/20-Balance, Ihr Tortendiagramm zur Geldverteilung und testen Sie Szenarien ohne Ihre echten Daten zu ändern.',
+    highlights: [
+      {
+        title: 'Drei Säulen & 50 / 30 / 20-Regel',
+        desc: 'Vergleichen Sie den Anteil Ihrer Fixkosten (ideal ≤ 50 %), Ihres variablen Budgets (~30 %) und Ihres Sparziels.',
+        icon: PieChart,
+      },
+      {
+        title: 'Tortendiagramm zur Zusammensetzung',
+        desc: 'Sehen Sie in einem interaktiven Kreisdiagramm, wie sich Ihr Einkommen auf Fixkosten, Variable und Sparen aufteilt.',
+        icon: ShieldCheck,
+      },
+      {
+        title: '„Was wäre wenn…“-Simulator',
+        desc: 'Simulieren Sie geringere Fixkosten oder Zusatzeinkommen und sehen Sie sofort den neuen Tagesgewinn.',
+        icon: Calculator,
+      },
+    ],
+  },
+  {
+    id: 7,
+    tabLabel: '7. Einstellungen & App',
     icon: Settings,
     title: 'Passen Sie NITA nach Ihren Wünschen an',
     description: 'Über das Einstellungsrad (⚙️) passen Sie Darstellung, Sprache, Hinweise und App-Funktionen an.',
-    highlights: [
-      {
-        title: 'Design, Sprache und Währung',
-        desc: 'Wechseln Sie zwischen Hell- und Dunkelmodus, wählen Sie aus 7 Sprachen und stellen Sie Ihr Währungsformat ein.',
-        icon: Globe,
-      },
-      {
-        title: 'Hinweise, Installation & Updates',
-        desc: 'Legen Sie Fälligkeitserinnerungen fest, installieren Sie NITA auf unterstützten Geräten und prüfen Sie verfügbare Updates.',
-        icon: Smartphone,
-      },
-    ],
+    highlights: [],
   },
 ];
 
@@ -1205,8 +1467,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   // Interactive micro-preview states local to the guide (never touch real user data)
   const [demoIncomeEditing, setDemoIncomeEditing] = useState(false);
   const [demoIncomeValue, setDemoIncomeValue] = useState<string | null>(null);
+  const [demoSavingsRate, setDemoSavingsRate] = useState<number>(20);
   const [demoExpensePaid, setDemoExpensePaid] = useState(false);
   const [demoExtraPos, setDemoExtraPos] = useState<'start' | 'end'>('start');
+  const [demoSimCut, setDemoSimCut] = useState<number>(30000);
+  const [demoSimBoost, setDemoSimBoost] = useState<number>(0);
 
   // Transición suave compatible con Tailwind estándar al cambiar de paso
   const prevStepRef = useRef(0);
@@ -1224,8 +1489,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       setActiveStepIndex(0);
       setDemoIncomeEditing(false);
       setDemoIncomeValue(null);
+      setDemoSavingsRate(20);
       setDemoExpensePaid(false);
       setDemoExtraPos('start');
+      setDemoSimCut(30000);
+      setDemoSimBoost(0);
     }
   }, [isOpen]);
 
@@ -1595,6 +1863,79 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             )}
 
             {currentStep.id === 2 && (
+              <div className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                      <PiggyBank className="w-4 h-4" />
+                    </div>
+                    <span className="text-sm font-black text-slate-900 dark:text-white">
+                      {t.savingsBarTitle}
+                    </span>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-right">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
+                      {t.savingsAmountLabel}
+                    </span>
+                    <span className="text-sm font-black text-emerald-700 dark:text-emerald-300 tabular-nums">
+                      {formatDemoMoney((1000000 * demoSavingsRate) / 100)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Barra de ahorro interactiva ilustrativa */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 tabular-nums shrink-0">
+                    0%
+                  </span>
+                  <div className="relative flex-1 h-6 bg-slate-200 dark:bg-slate-700/80 rounded-full overflow-hidden">
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-xs font-black text-slate-700 dark:text-slate-100 tabular-nums">
+                        {demoSavingsRate}%
+                      </span>
+                    </div>
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-[width] duration-150"
+                      style={{ width: `${demoSavingsRate}%` }}
+                    />
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 flex items-center justify-center transition-[clip-path] duration-150"
+                      style={{ clipPath: `inset(0 ${100 - demoSavingsRate}% 0 0)` }}
+                    >
+                      <span className="text-xs font-black text-white tabular-nums">
+                        {demoSavingsRate}%
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 tabular-nums shrink-0">
+                    100%
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mr-1">
+                    {t.shortcuts}
+                  </span>
+                  {[0, 10, 20, 30, 50].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => setDemoSavingsRate(rate)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                        demoSavingsRate === rate
+                          ? 'bg-emerald-600 text-white font-black'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {rate}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {currentStep.id === 3 && (
               <div className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4 space-y-2.5">
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <button
@@ -1649,7 +1990,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               </div>
             )}
 
-            {currentStep.id === 3 && (
+            {currentStep.id === 4 && (
               <div className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4 space-y-3">
                 {/* Selector interactivo real de ubicación de Días Extras */}
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1779,7 +2120,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               </div>
             )}
 
-            {currentStep.id === 4 && (
+            {currentStep.id === 5 && (
               <div className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
                   <div className="flex-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 flex items-center justify-between gap-2">
@@ -1832,7 +2173,119 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               </div>
             )}
 
-            {currentStep.id === 5 && (
+            {currentStep.id === 6 && (() => {
+              const simIncome = 1000000 + demoSimBoost;
+              const simFixed = Math.max(0, 250000 - demoSimCut);
+              const simSavings = (simIncome * 20) / 100;
+              const simVariable = Math.max(0, simIncome - simFixed - simSavings);
+              const simFixedPct = Math.round((simFixed / simIncome) * 1000) / 10;
+              const simSavingsPct = Math.round((simSavings / simIncome) * 1000) / 10;
+              const simVariablePct = Math.max(0, Math.round((100 - simFixedPct - simSavingsPct) * 10) / 10);
+              const baseVariable = 550000;
+              const dailyGain = (simVariable - baseVariable) / 30;
+              return (
+                <div className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-purple-100/80 dark:bg-purple-950/60 text-purple-700 dark:text-purple-400">
+                        <Calculator className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-black text-slate-900 dark:text-white">
+                        {t.simulatorTitle}
+                      </span>
+                    </div>
+                    {dailyGain > 0 && (
+                      <span className="text-[11px] font-black text-emerald-700 dark:text-emerald-400 tabular-nums">
+                        +{formatDemoMoney(dailyGain)}/{t.perDay}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Controles interactivos ilustrativos */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate">
+                        {t.simulateFixedCut}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {[0, 30000, 60000].map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setDemoSimCut(val)}
+                            className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-bold tabular-nums transition-colors cursor-pointer ${
+                              demoSimCut === val
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            {val === 0 ? '$ 0' : `-${formatDemoMoney(val)}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate">
+                        {t.simulateIncomeBoost}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {[0, 100000, 200000].map((val) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setDemoSimBoost(val)}
+                            className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-bold tabular-nums transition-colors cursor-pointer ${
+                              demoSimBoost === val
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600'
+                            }`}
+                          >
+                            {val === 0 ? '$ 0' : `+${formatDemoMoney(val)}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Distribución proyectada */}
+                  <div className="grid grid-cols-3 gap-1.5 text-center">
+                    <div className="p-2 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/70 dark:border-blue-800/60">
+                      <span className="text-[10px] font-bold text-blue-700 dark:text-blue-400 block truncate">
+                        {t.simPillarFixed}
+                      </span>
+                      <span className="text-sm font-black text-blue-800 dark:text-blue-200 tabular-nums">
+                        {simFixedPct}%
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/60">
+                      <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400 block truncate">
+                        {t.simPillarVariable}
+                      </span>
+                      <span className="text-sm font-black text-indigo-800 dark:text-indigo-200 tabular-nums">
+                        {simVariablePct}%
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/70 dark:border-emerald-800/60">
+                      <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 block truncate">
+                        {t.simPillarSavings}
+                      </span>
+                      <span className="text-sm font-black text-emerald-800 dark:text-emerald-200 tabular-nums">
+                        {simSavingsPct}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800 flex overflow-hidden">
+                    <div style={{ width: `${simFixedPct}%` }} className="bg-blue-600 h-full transition-all duration-150" />
+                    <div style={{ width: `${simVariablePct}%` }} className="bg-indigo-500 h-full transition-all duration-150" />
+                    <div style={{ width: `${simSavingsPct}%` }} className="bg-emerald-500 h-full transition-all duration-150" />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {currentStep.id === 7 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {[
                   { icon: Sun, secondaryIcon: Moon, item: uiCopy.step5Items[0] },
@@ -1866,29 +2319,31 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             )}
 
             {/* Tarjetas explicativas concisas (2 a 4 puntos por paso) */}
-            <div className="space-y-2.5">
-              {currentStep.highlights.map((h, i) => {
-                const HIcon = h.icon;
-                return (
-                  <div
-                    key={i}
-                    className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 flex items-start gap-3"
-                  >
-                    <div className="p-2 rounded-xl bg-blue-100/70 dark:bg-slate-800 text-blue-700 dark:text-sky-400 shrink-0 mt-0.5">
-                      <HIcon className="w-4 h-4" />
+            {currentStep.highlights.length > 0 && (
+              <div className="space-y-2.5">
+                {currentStep.highlights.map((h, i) => {
+                  const HIcon = h.icon;
+                  return (
+                    <div
+                      key={i}
+                      className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 flex items-start gap-3"
+                    >
+                      <div className="p-2 rounded-xl bg-blue-100/70 dark:bg-slate-800 text-blue-700 dark:text-sky-400 shrink-0 mt-0.5">
+                        <HIcon className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white block">
+                          {h.title}
+                        </span>
+                        <span className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 block leading-relaxed">
+                          {h.desc}
+                        </span>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white block">
-                        {h.title}
-                      </span>
-                      <span className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 block leading-relaxed">
-                        {h.desc}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Aclaración destacada obligatoria en Paso 1 */}
             {currentStep.id === 1 && (
@@ -1906,8 +2361,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               </div>
             )}
 
-            {/* Mensaje final obligatorio en Paso 5 */}
-            {currentStep.id === 5 && (
+            {/* Mensaje final obligatorio en Paso 7 */}
+            {currentStep.id === 7 && (
               <div className="p-4 rounded-2xl bg-blue-50 dark:bg-slate-900 border border-blue-200 dark:border-blue-800/80 text-xs sm:text-sm text-slate-800 dark:text-slate-100 flex items-start gap-3">
                 <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-sky-400 shrink-0 mt-0.5" />
                 <span className="font-bold leading-relaxed">{uiCopy.step5ClosingMessage}</span>

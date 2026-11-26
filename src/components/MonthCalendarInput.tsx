@@ -91,6 +91,10 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const pointerDownRef = useRef(false);
+  const wasOpenOnPointerDownRef = useRef(false);
+  const suppressOpenOnFocusRef = useRef(false);
+  const lastTabAtRef = useRef(0);
 
   const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
   const monthMinDate = `${monthPrefix}-01`;
@@ -110,6 +114,28 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
   })();
 
   const formattedDisplayValue = value.trim() ? formatNumericDateByLanguage(value.trim(), language) : '';
+
+  const closeCalendar = useCallback((restoreInputFocus = false) => {
+    setIsOpen(false);
+    if (restoreInputFocus) {
+      suppressOpenOnFocusRef.current = true;
+      inputRef.current?.focus();
+    }
+  }, []);
+
+  // Track recent Tab key presses so keyboard Tab navigation reliably triggers auto-open on focus
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleGlobalTabKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        lastTabAtRef.current = Date.now();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalTabKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalTabKeyDown, true);
+    };
+  }, []);
 
   const updatePopoverPosition = useCallback(() => {
     const inputEl = inputRef.current;
@@ -145,11 +171,24 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
         setIsOpen(false);
       }
     };
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as Node | null;
+      if (
+        target &&
+        !inputRef.current?.contains(target) &&
+        !popoverRef.current?.contains(target)
+      ) {
+        setIsOpen(false);
+      }
+    };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        setIsOpen(false);
+        const focusedInsidePopover = Boolean(
+          document.activeElement && popoverRef.current?.contains(document.activeElement)
+        );
+        closeCalendar(focusedInsidePopover);
       }
     };
 
@@ -157,6 +196,7 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
     window.addEventListener('scroll', handleReposition, true);
     document.addEventListener('mousedown', handleOutsideClick);
     document.addEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('focusin', handleFocusIn, true);
     window.addEventListener('keydown', handleKeyDown, true);
 
     return () => {
@@ -164,14 +204,18 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
       window.removeEventListener('scroll', handleReposition, true);
       document.removeEventListener('mousedown', handleOutsideClick);
       document.removeEventListener('touchstart', handleOutsideClick);
+      document.removeEventListener('focusin', handleFocusIn, true);
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [isOpen, updatePopoverPosition]);
+  }, [isOpen, updatePopoverPosition, closeCalendar]);
 
   const handleSelectDay = (day: number) => {
+    const focusedInsidePopover = Boolean(
+      document.activeElement && popoverRef.current?.contains(document.activeElement)
+    );
     const iso = `${monthPrefix}-${String(day).padStart(2, '0')}`;
     onChange(iso);
-    setIsOpen(false);
+    closeCalendar(focusedInsidePopover);
   };
 
   const focusBorderClass =
@@ -203,7 +247,11 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
       aria-label={`${monthName} ${year}`}
       lang={language}
       onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+      }}
+      onTouchStart={(e) => e.stopPropagation()}
       style={{
         position: 'fixed',
         top: `${coords.top}px`,
@@ -223,7 +271,7 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
         </div>
         <button
           type="button"
-          onClick={() => setIsOpen(false)}
+          onClick={() => closeCalendar(Boolean(document.activeElement && popoverRef.current?.contains(document.activeElement)))}
           title={t.closeModal}
           aria-label={t.closeModal}
           className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
@@ -257,6 +305,7 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
             <button
               key={day}
               type="button"
+              data-calendar-day={day}
               onClick={() => handleSelectDay(day)}
               className={`h-8 rounded-lg text-xs tabular-nums flex items-center justify-center transition-colors cursor-pointer ${
                 isSelected
@@ -279,8 +328,11 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
             <button
               type="button"
               onClick={() => {
+                const focusedInsidePopover = Boolean(
+                  document.activeElement && popoverRef.current?.contains(document.activeElement)
+                );
                 onChange('');
-                setIsOpen(false);
+                closeCalendar(focusedInsidePopover);
               }}
               className="px-2 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
             >
@@ -300,7 +352,7 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
 
         <button
           type="button"
-          onClick={() => setIsOpen(false)}
+          onClick={() => closeCalendar(Boolean(document.activeElement && popoverRef.current?.contains(document.activeElement)))}
           className="px-2.5 py-1 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer ml-auto"
         >
           {t.closeModal}
@@ -325,11 +377,51 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         title={title}
-        onClick={() => setIsOpen((prev) => !prev)}
+        onPointerDown={() => {
+          pointerDownRef.current = true;
+          wasOpenOnPointerDownRef.current = isOpen;
+          window.setTimeout(() => {
+            pointerDownRef.current = false;
+          }, 300);
+        }}
+        onFocus={(e) => {
+          if (suppressOpenOnFocusRef.current) {
+            suppressOpenOnFocusRef.current = false;
+            return;
+          }
+          if (pointerDownRef.current) return;
+          const isTabNavigation = Date.now() - lastTabAtRef.current < 200;
+          if (isTabNavigation || e.relatedTarget !== null) {
+            setIsOpen(true);
+          }
+        }}
+        onBlur={(e) => {
+          const nextTarget = e.relatedTarget as Node | null;
+          if (
+            nextTarget &&
+            !inputRef.current?.contains(nextTarget) &&
+            !popoverRef.current?.contains(nextTarget)
+          ) {
+            setIsOpen(false);
+          }
+        }}
+        onClick={() => {
+          const wasOpen = pointerDownRef.current ? wasOpenOnPointerDownRef.current : isOpen;
+          pointerDownRef.current = false;
+          setIsOpen(!wasOpen);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
             e.preventDefault();
-            setIsOpen(true);
+            if (!isOpen) {
+              setIsOpen(true);
+            } else if (e.key === 'ArrowDown') {
+              const targetDay = selectedDay ?? (isTodayInActiveMonth ? todayDay : 1);
+              const dayBtn = popoverRef.current?.querySelector<HTMLButtonElement>(
+                `button[data-calendar-day="${targetDay}"]`
+              );
+              dayBtn?.focus();
+            }
           }
         }}
         className={`w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-3 pr-9 py-2.5 text-sm font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden ${focusBorderClass} cursor-pointer truncate`}
