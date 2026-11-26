@@ -40,15 +40,27 @@ export const TRANSLATION_MAP: Record<string, Translations> = {
 
 const LANGUAGE_STORAGE_KEY = 'nita_selected_language';
 
-export function loadSelectedLanguage(): string {
+function resolveLanguageStorageKey(userId?: string | null, isGuest?: boolean): string {
+  if (userId && typeof userId === 'string' && userId.trim().length > 0) {
+    return `${LANGUAGE_STORAGE_KEY}_user_${userId.trim()}`;
+  }
+  if (isGuest) {
+    return `${LANGUAGE_STORAGE_KEY}_guest`;
+  }
+  return LANGUAGE_STORAGE_KEY;
+}
+
+export function loadSelectedLanguage(userId?: string | null, isGuest?: boolean): string {
   if (typeof window === 'undefined') return 'es';
-  const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'es';
+  const key = resolveLanguageStorageKey(userId, isGuest);
+  const saved = localStorage.getItem(key) || 'es';
   return TRANSLATION_MAP[saved] ? saved : 'es';
 }
 
-export function saveSelectedLanguage(code: string): void {
+export function saveSelectedLanguage(code: string, userId?: string | null, isGuest?: boolean): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(LANGUAGE_STORAGE_KEY, code);
+  const key = resolveLanguageStorageKey(userId, isGuest);
+  localStorage.setItem(key, code);
 }
 
 export function getTranslations(code: string): Translations {

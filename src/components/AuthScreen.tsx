@@ -13,8 +13,10 @@ import {
   LogIn
 } from 'lucide-react';
 import { validateUsernameFormat, validatePasswordFormat } from '../services/authAccountService';
+import { loadSelectedLanguage, getTranslations } from '../utils/languages';
 
 export const AuthScreen: React.FC = () => {
+  const t = getTranslations(loadSelectedLanguage());
   const {
     signInWithGoogle,
     signInWithUsername,
@@ -43,7 +45,7 @@ export const AuthScreen: React.FC = () => {
       setIsGoogleLoading(true);
       await signInWithGoogle();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al iniciar sesión con Google.';
+      const msg = err instanceof Error ? err.message : t.authErrGoogle;
       setLocalError(msg);
     } finally {
       setIsGoogleLoading(false);
@@ -57,11 +59,11 @@ export const AuthScreen: React.FC = () => {
 
     const cleanUser = username.trim();
     if (!cleanUser) {
-      setLocalError('Por favor, ingresa tu nombre de usuario.');
+      setLocalError(t.authErrMissingUsername);
       return;
     }
     if (!password) {
-      setLocalError('Por favor, ingresa tu contraseña.');
+      setLocalError(t.authErrMissingPassword);
       return;
     }
 
@@ -69,7 +71,7 @@ export const AuthScreen: React.FC = () => {
       setIsLoading(true);
       await signInWithUsername(cleanUser, password);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al iniciar sesión.';
+      const msg = err instanceof Error ? err.message : t.authErrSignIn;
       setLocalError(msg);
     } finally {
       setIsLoading(false);
@@ -84,18 +86,18 @@ export const AuthScreen: React.FC = () => {
     const cleanUser = username.trim();
     const userValidation = validateUsernameFormat(cleanUser);
     if (!userValidation.valid) {
-      setLocalError(userValidation.error || 'Nombre de usuario inválido.');
+      setLocalError(userValidation.error || t.authErrInvalidUsername);
       return;
     }
 
     const passValidation = validatePasswordFormat(password);
     if (!passValidation.valid) {
-      setLocalError(passValidation.error || 'Contraseña inválida.');
+      setLocalError(passValidation.error || t.authErrInvalidPassword);
       return;
     }
 
     if (password !== confirmPassword) {
-      setLocalError('Las contraseñas no coinciden. Por favor, revísalas.');
+      setLocalError(t.authErrPasswordsMismatch);
       return;
     }
 
@@ -103,7 +105,7 @@ export const AuthScreen: React.FC = () => {
       setIsLoading(true);
       await registerWithUsername(cleanUser, password);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al crear la cuenta.';
+      const msg = err instanceof Error ? err.message : t.authErrCreateAccount;
       setLocalError(msg);
     } finally {
       setIsLoading(false);
@@ -137,7 +139,7 @@ export const AuthScreen: React.FC = () => {
             NITA
           </h1>
           <p className="text-xs font-bold tracking-widest text-blue-600 dark:text-blue-400 uppercase mt-1">
-            Tus Finanzas, Más Simples
+            {t.authTagline}
           </p>
         </div>
 
@@ -166,8 +168,8 @@ export const AuthScreen: React.FC = () => {
           <div className="w-full mb-4 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-200 animate-in fade-in duration-200">
             <WifiOff className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
             <div className="text-2xs leading-snug">
-              <span className="font-bold block">Dispositivo sin conexión (Offline)</span>
-              Para iniciar sesión o crear una cuenta necesitas internet, o puedes usar <strong>"Ingresar sin cuenta"</strong>.
+              <span className="font-bold block">{t.authOfflineTitle}</span>
+              {t.authOfflineDesc} <strong>&ldquo;{t.authContinueGuest}&rdquo;</strong>.
             </div>
           </div>
         )}
@@ -182,7 +184,7 @@ export const AuthScreen: React.FC = () => {
           {isGoogleLoading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-              <span>Conectando con Google...</span>
+              <span>{t.authConnectingGoogle}</span>
             </>
           ) : (
             <>
@@ -204,7 +206,7 @@ export const AuthScreen: React.FC = () => {
                   d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"
                 />
               </svg>
-              <span>Continuar con Google</span>
+              <span>{t.authContinueGoogle}</span>
             </>
           )}
         </button>
@@ -213,7 +215,7 @@ export const AuthScreen: React.FC = () => {
         <div className="relative mb-4 flex items-center justify-center w-full">
           <div className="w-full border-t border-slate-200 dark:border-slate-800" />
           <span className="absolute bg-white dark:bg-slate-900 px-3 text-[10px] uppercase tracking-wider font-extrabold text-slate-400 dark:text-slate-500">
-            o con usuario y contraseña
+            {t.authOrWithCredentials}
           </span>
         </div>
 
@@ -234,7 +236,7 @@ export const AuthScreen: React.FC = () => {
             }`}
           >
             <LogIn className="w-3.5 h-3.5" />
-            <span>Iniciar Sesión</span>
+            <span>{t.authSignInTab}</span>
           </button>
           <button
             type="button"
@@ -251,7 +253,7 @@ export const AuthScreen: React.FC = () => {
             }`}
           >
             <UserPlus className="w-3.5 h-3.5" />
-            <span>Crear Cuenta</span>
+            <span>{t.authRegisterTab}</span>
           </button>
         </div>
 
@@ -263,7 +265,7 @@ export const AuthScreen: React.FC = () => {
           {/* Username Input */}
           <div className="space-y-1">
             <label className="text-2xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
-              <span>Nombre de usuario</span>
+              <span>{t.authUsernameLabel}</span>
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -279,14 +281,14 @@ export const AuthScreen: React.FC = () => {
                   setUsername(e.target.value.replace(/[^a-zA-Z0-9_.-]/g, ''));
                   setLocalError(null);
                 }}
-                placeholder="NITA123; Usuario1; User20"
+                placeholder={t.authUsernamePlaceholder}
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-semibold bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                 disabled={isLoading}
               />
             </div>
             {activeTab === 'register' && (
               <p className="text-[10px] text-slate-400 leading-tight">
-                Mínimo 3 caracteres. Letras, números, puntos y guiones.
+                {t.authUsernameHint}
               </p>
             )}
           </div>
@@ -294,7 +296,7 @@ export const AuthScreen: React.FC = () => {
           {/* Password Input */}
           <div className="space-y-1">
             <label className="text-2xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Contraseña
+              {t.authPasswordLabel}
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -322,7 +324,7 @@ export const AuthScreen: React.FC = () => {
             </div>
             {activeTab === 'register' && (
               <p className="text-[10px] text-slate-400 leading-tight">
-                Mínimo 6 caracteres.
+                {t.authPasswordHint}
               </p>
             )}
           </div>
@@ -331,7 +333,7 @@ export const AuthScreen: React.FC = () => {
           {activeTab === 'register' && (
             <div className="space-y-1">
               <label className="text-2xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Confirmar Contraseña
+                {t.authConfirmPasswordLabel}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -362,12 +364,12 @@ export const AuthScreen: React.FC = () => {
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>{activeTab === 'login' ? 'Iniciando sesión...' : 'Creando cuenta...'}</span>
+                <span>{activeTab === 'login' ? t.authSigningInBtn : t.authCreatingAccountBtn}</span>
               </>
             ) : (
               <>
                 {activeTab === 'login' ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-                <span>{activeTab === 'login' ? 'Iniciar Sesión' : 'Crear Cuenta'}</span>
+                <span>{activeTab === 'login' ? t.authSignInTab : t.authRegisterTab}</span>
               </>
             )}
           </button>
@@ -377,7 +379,7 @@ export const AuthScreen: React.FC = () => {
         <div className="relative my-4 flex items-center justify-center w-full">
           <div className="w-full border-t border-slate-200 dark:border-slate-800" />
           <span className="absolute bg-white dark:bg-slate-900 px-3 text-2xs uppercase tracking-wider font-extrabold text-slate-400 dark:text-slate-500">
-            o también
+            {t.authOrAlso}
           </span>
         </div>
 
@@ -389,15 +391,15 @@ export const AuthScreen: React.FC = () => {
           className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl border border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600 bg-slate-50/90 hover:bg-slate-100 dark:bg-slate-800/60 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs transition-all shadow-xs active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
         >
           <UserX className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
-          <span>Ingresar sin cuenta</span>
+          <span>{t.authContinueGuest}</span>
         </button>
 
         {/* Nota explicativa sobre el modo con cuenta */}
         <div className="mt-4 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 text-center text-3xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xs">
           <p className="font-bold text-slate-700 dark:text-slate-300 mb-0.5">
-            ¿Por qué iniciar sesión?
+            {t.authWhySignInTitle}
           </p>
-          Te permite respaldar y acceder a tus datos financieros desde cualquier dispositivo (celular o computadora) con tu cuenta de Google o usuario y contraseña.
+          {t.authWhySignInDesc}
         </div>
       </div>
     </div>

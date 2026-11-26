@@ -33,6 +33,8 @@ interface MetricCardsProps {
   currency: CurrencyCode;
   currentDay: number | null;
   language?: string;
+  year?: number;
+  month?: number;
 }
 
 export const MetricCards: React.FC<MetricCardsProps> = ({
@@ -46,6 +48,8 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   calcDetails,
   currency,
   language = 'es',
+  year,
+  month,
 }) => {
   const t = getTranslations(language);
   const currencySymbol = CURRENCIES[currency]?.symbol || '$';
@@ -66,6 +70,12 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   useEffect(() => {
     setLocalSavingsRate(Math.min(100, Math.max(0, savingsRate)));
   }, [savingsRate]);
+
+  // Close inline editors if user switches active month/year
+  useEffect(() => {
+    setIsEditingIncome(false);
+    setIsEditingSavingsAmount(false);
+  }, [year, month]);
 
   // Keep active edit input within the current month's net income ceiling if income changes
   useEffect(() => {

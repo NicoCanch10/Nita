@@ -94,6 +94,15 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
   const [editCategory, setEditCategory] = useState<string>('');
   const [editDueDate, setEditDueDate] = useState<string>('');
 
+  // Close transient modals and clear draft values when switching months
+  useEffect(() => {
+    setIsAddModalOpen(false);
+    setEditingExpenseId(null);
+    setName('');
+    setAmount('');
+    setDueDate('');
+  }, [activeYear, activeMonth]);
+
   useEffect(() => {
     if (!editingExpenseId && !isAddModalOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -313,7 +322,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
           data-testid="fixed-expenses-add-trigger"
           className="w-full sm:w-auto sm:min-w-[200px] min-h-[42px] inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 sm:px-8 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-blue-500/40"
         >
-          <span>CARGAR +</span>
+          <span>{t.addExpenseTriggerBtn}</span>
         </button>
       </div>
 
@@ -380,7 +389,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
           onClick={handleOpenAddModal}
           className="hidden md:inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2 px-6 md:min-w-[175px] lg:w-full lg:max-w-[270px] xl:max-w-[320px] rounded-xl transition-all shadow-sm cursor-pointer whitespace-nowrap shrink-0 lg:justify-self-end focus:outline-hidden focus:ring-2 focus:ring-blue-500/40"
         >
-          <span>CARGAR +</span>
+          <span>{t.addExpenseTriggerBtn}</span>
         </button>
 
       </div>
@@ -413,7 +422,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                   <button
                     type="button"
                     onClick={() => onTogglePaid(expense.id)}
-                    title={expense.isPaid ? 'Marcar como pendiente' : 'Marcar como pagado'}
+                    title={expense.isPaid ? t.markPending : t.markPaid}
                     className="text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer shrink-0 flex items-center justify-center"
                   >
                     {expense.isPaid ? (
@@ -477,7 +486,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                     <button
                       type="button"
                       onClick={() => startEditExpense(expense)}
-                      title="Editar gasto (concepto, monto, categoría o vencimiento)"
+                      title={t.editFixedTooltip}
                       className="p-1.5 sm:p-2 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-xl transition-colors cursor-pointer shrink-0"
                     >
                       <Pencil className="w-4 h-4 sm:w-[17px] sm:h-[17px]" />
@@ -486,7 +495,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteExpense(expense.id)}
-                      title="Eliminar gasto"
+                      title={t.deleteExpense}
                       className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-xl transition-colors cursor-pointer shrink-0"
                     >
                       <Trash2 className="w-4 h-4 sm:w-[17px] sm:h-[17px]" />
@@ -506,7 +515,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
           onClick={handleCloseAddModal}
           role="dialog"
           aria-modal="true"
-          aria-label="Cargar Gasto Fijo"
+          aria-label={t.addFixedModalTitle}
         >
           <form
             onClick={(e) => e.stopPropagation()}
@@ -518,12 +527,12 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 <span className="p-1.5 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
                   <Plus className="w-4 h-4" />
                 </span>
-                Cargar Gasto Fijo
+                {t.addFixedModalTitle}
               </span>
               <button
                 type="button"
                 onClick={handleCloseAddModal}
-                title="Cerrar"
+                title={t.closeModal}
                 className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -534,7 +543,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
               {/* Concepto / Nombre */}
               <div className="sm:col-span-12">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Concepto
+                  {t.conceptFieldLabel}
                 </label>
                 <input
                   type="text"
@@ -550,7 +559,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
               {/* Monto */}
               <div className="sm:col-span-4">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Importe ({currency})
+                  {t.amountFieldLabel.replace('{currency}', currency)}
                 </label>
                 <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-blue-500 transition-colors">
                   <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
@@ -571,13 +580,13 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
               {/* Categoría */}
               <div className="sm:col-span-4">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Categoría
+                  {t.categoryFieldLabel}
                 </label>
                 <div className="flex items-center gap-1.5">
                   <div
                     className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-white dark:border-slate-700"
                     style={{ backgroundColor: currentCategoryInfo.color }}
-                    title={`Color: ${currentCategoryInfo.label}`}
+                    title={t.colorTagTitle.replace('{label}', currentCategoryInfo.label)}
                   />
                   <select
                     value={category}
@@ -599,7 +608,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
               {/* Fecha de vencimiento (solo calendario del mes en curso e idioma seleccionado en NITA) */}
               <div className="sm:col-span-4 relative">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
+                  {t.dateFieldLabel}
                 </label>
                 <MonthCalendarInput
                   value={dueDate}
@@ -608,8 +617,8 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                   year={activeYear}
                   daysInMonth={daysInMonth}
                   language={language}
-                  ariaLabel={`${t.dueDayShort} (opcional)`}
-                  title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (opcional)`}
+                  ariaLabel={`${t.dueDayShort} (${t.optionalSuffix})`}
+                  title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (${t.optionalSuffix})`}
                   accentColor="blue"
                 />
               </div>
@@ -621,14 +630,14 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 onClick={handleCloseAddModal}
                 className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
               >
-                Cancelar
+                {t.cancel}
               </button>
               <button
                 type="submit"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Cargar Gasto</span>
+                <span>{t.submitExpenseBtn}</span>
               </button>
             </div>
           </form>
@@ -648,7 +657,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
             onClick={handleCancelEditExpense}
             role="dialog"
             aria-modal="true"
-            aria-label="Modificar Gasto Fijo"
+            aria-label={t.editFixedModalTitle}
           >
             <form
               onClick={(e) => e.stopPropagation()}
@@ -663,7 +672,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                   <span className="p-1.5 bg-blue-50 dark:bg-blue-950/60 rounded-xl text-blue-600 dark:text-blue-400">
                     <Pencil className="w-4 h-4" />
                   </span>
-                  Modificar Gasto Fijo
+                  {t.editFixedModalTitle}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
@@ -672,16 +681,16 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                       onDeleteExpense(editingExpense.id);
                       setEditingExpenseId(null);
                     }}
-                    title="Eliminar este gasto"
+                    title={t.deleteExpense}
                     className="text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Eliminar</span>
+                    <span>{t.deleteBtnLabel}</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleCancelEditExpense}
-                    title="Cerrar"
+                    title={t.closeModal}
                     className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
@@ -693,13 +702,13 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 {/* Concepto / Nombre */}
                 <div className="sm:col-span-12">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Concepto
+                    {t.conceptFieldLabel}
                   </label>
                   <input
                     type="text"
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    placeholder="Concepto"
+                    placeholder={t.conceptFieldLabel}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-900 dark:text-white focus:outline-hidden focus:border-blue-500"
                     autoFocus
                     required
@@ -709,7 +718,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 {/* Monto */}
                 <div className="sm:col-span-4">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Importe ({currency})
+                    {t.amountFieldLabel.replace('{currency}', currency)}
                   </label>
                   <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-blue-500 transition-colors">
                     <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
@@ -730,13 +739,18 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 {/* Categoría */}
                 <div className="sm:col-span-4">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Categoría
+                    {t.categoryFieldLabel}
                   </label>
                   <select
                     value={editCategory}
                     onChange={(e) => setEditCategory(e.target.value)}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer truncate"
                   >
+                    {editCategory && !sortedCategories.some(c => c.id === editCategory) && (
+                      <option value={editCategory} className="dark:bg-slate-800 dark:text-white">
+                        {getCategoryInfo(editCategory, categories, language).label}
+                      </option>
+                    )}
                     {sortedCategories.map((c) => (
                       <option key={c.id} value={c.id} className="dark:bg-slate-800 dark:text-white">
                         {getCategoryInfo(c.id, categories, language).label}
@@ -748,7 +762,7 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                 {/* Fecha de vencimiento (solo calendario del mes en curso e idioma seleccionado en NITA) */}
                 <div className="sm:col-span-4 relative">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
+                    {t.dateFieldLabel}
                   </label>
                   <MonthCalendarInput
                     value={editDueDate}
@@ -757,8 +771,8 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                     year={activeYear}
                     daysInMonth={daysInMonth}
                     language={language}
-                    ariaLabel={`${t.dueDayShort} (opcional)`}
-                    title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (opcional)`}
+                    ariaLabel={`${t.dueDayShort} (${t.optionalSuffix})`}
+                    title={`${t.dueDatePlaceholder.replace('1-31', `1-${daysInMonth}`)} (${t.optionalSuffix})`}
                     accentColor="blue"
                   />
                 </div>
@@ -770,14 +784,14 @@ export const FixedExpensesSection: React.FC<FixedExpensesSectionProps> = ({
                   onClick={handleCancelEditExpense}
                   className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
                 >
-                  Cancelar
+                  {t.cancel}
                 </button>
                 <button
                   type="submit"
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  <span>Guardar Cambios</span>
+                  <span>{t.saveChangesBtn}</span>
                 </button>
               </div>
             </form>

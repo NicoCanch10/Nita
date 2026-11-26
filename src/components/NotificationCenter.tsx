@@ -35,6 +35,8 @@ interface NotificationCenterProps {
   nextMonthExpenses?: FixedExpense[];
   nextMonthYear?: number;
   nextMonth?: number;
+  userId?: string | null;
+  isGuestMode?: boolean;
 }
 
 export const NotificationCenter: React.FC<NotificationCenterProps> = ({
@@ -50,6 +52,8 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   nextMonthExpenses,
   nextMonthYear,
   nextMonth,
+  userId,
+  isGuestMode,
 }) => {
   const t = getTranslations(language);
   const [isOpen, setIsOpen] = useState(false);
@@ -76,9 +80,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   // Check and trigger native notifications on load if permission is granted
   useEffect(() => {
     if (permission === 'granted' && notifications.length > 0) {
-      checkAndNotifyBrowser(notifications, alertSettings);
+      checkAndNotifyBrowser(notifications, alertSettings, language, userId, isGuestMode);
     }
-  }, [permission, notifications, alertSettings]);
+  }, [permission, notifications, alertSettings, language, userId, isGuestMode]);
 
   // Close on outside click
   useEffect(() => {
@@ -103,7 +107,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
         '🔔 ' + t.notificationsTitle + ' - NITA',
         t.alertScheduleNote.replace('{days}', String(alertSettings.daysInAdvance))
       );
-      checkAndNotifyBrowser(notifications);
+      checkAndNotifyBrowser(notifications, alertSettings, language, userId, isGuestMode);
     }
   };
 

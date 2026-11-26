@@ -18,7 +18,7 @@ import {
   getDaysInMonth, 
   calculateMonthDistribution, 
   calculateFiveJars, 
-  calculateMidMonthFixedExpenseJarAdjustments,
+  recalculateMonthFixedExpensesWithJarProtection,
   hasOverbudgetJarAdjustments,
   clearOverbudgetJarAdjustments,
   getCurrentDayIfActive, 
@@ -57,6 +57,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { JarIcon } from './components/JarIcon';
 import { DueDateAlertSettings, loadAlertSettings } from './utils/notifications';
 import { loadSelectedLanguage, saveSelectedLanguage, getTranslations } from './utils/languages';
+import { formatCurrency } from './utils/currency';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { auth } from './lib/firebase';
@@ -116,8 +117,8 @@ function MainApp() {
     setActiveConflicts(loaded);
   }, [user?.uid]);
 
-  // Theme state: light or dark mode
-  const { theme, toggleTheme } = useTheme();
+  // Theme state: light or dark mode (scoped per identity)
+  const { theme, toggleTheme } = useTheme(isGuestMode ? undefined : user?.uid, isGuestMode);
 
   // PWA update manager
   const { 
@@ -133,6 +134,12 @@ function MainApp() {
   // Interactive Onboarding tutorial modal
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    type: 'reset' | 'copy' | 'info';
+    title: string;
+    message: string;
+    confirmLabel?: string;
+  } | null>(null);
 
   // Check if app just updated automatically
   useEffect(() => {
@@ -144,16 +151,24 @@ function MainApp() {
     }
   }, []);
 
+  const onboardingStorageKey = isGuestMode
+    ? 'nita_onboarding_seen_guest'
+    : user?.uid
+      ? `nita_onboarding_seen_user_${user.uid}`
+      : 'nita_onboarding_seen';
+
   // Check first entrance for onboarding: do not mark as seen until user clicks X or completes it
   useEffect(() => {
-    const seen = localStorage.getItem('nita_onboarding_seen');
+    const seen = localStorage.getItem(onboardingStorageKey);
     if (!seen) {
       setIsOnboardingOpen(true);
+    } else {
+      setIsOnboardingOpen(false);
     }
-  }, []);
+  }, [onboardingStorageKey]);
 
   const handleCloseOnboarding = () => {
-    localStorage.setItem('nita_onboarding_seen', 'true');
+    localStorage.setItem(onboardingStorageKey, 'true');
     setIsOnboardingOpen(false);
   };
 
@@ -166,6 +181,21 @@ function MainApp() {
   const [month, setMonth] = useState<number>(initialData.month);
   const [year, setYear] = useState<number>(initialData.year);
   const currentKey = useMemo(() => getMonthKey(year, month), [year, month]);
+
+  useEffect(() => {
+    setConfirmDialog(null);
+  }, [currentKey]);
+
+  useEffect(() => {
+    if (!confirmDialog) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setConfirmDialog(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [confirmDialog]);
   const [currency, setCurrency] = useState<CurrencyCode>(initialData.currency);
   const [monthsData, setMonthsData] = useState<Record<string, MonthData>>(initialData.monthsData);
 
@@ -220,12 +250,22 @@ function MainApp() {
     return () => window.cancelAnimationFrame(rafId);
   }, [activeTab, tabScrollTrigger]);
 
-  // Due date alert preferences (configurable in settings wheel)
-  const [alertSettings, setAlertSettings] = useState<DueDateAlertSettings>(() => loadAlertSettings());
+  // Due date alert preferences (configurable in settings wheel, scoped per identity)
+  const [alertSettings, setAlertSettings] = useState<DueDateAlertSettings>(() =>
+    loadAlertSettings(isGuestMode ? undefined : user?.uid, isGuestMode)
+  );
 
-  // App language state (synchronized across settings and sections)
-  // App language state (synchronized across settings and sections)
-  const [language, setLanguage] = useState<string>(() => loadSelectedLanguage());
+  // App language state (synchronized across settings and sections, scoped per identity)
+  const [language, setLanguage] = useState<string>(() =>
+    loadSelectedLanguage(isGuestMode ? undefined : user?.uid, isGuestMode)
+  );
+
+  useEffect(() => {
+    const scopedUid = isGuestMode ? undefined : user?.uid;
+    setAlertSettings(loadAlertSettings(scopedUid, isGuestMode));
+    const loadedLang = loadSelectedLanguage(scopedUid, isGuestMode);
+    setLanguage(loadedLang);
+  }, [user?.uid, isGuestMode]);
 
   // Track cloud synchronization status across devices
   const [isCloudSyncReady, setIsCloudSyncReady] = useState<boolean>(!user || isOfflineSession || !isOnline);
@@ -360,7 +400,7 @@ function MainApp() {
   const handleLanguageChange = (code: string) => {
     setLanguage(code);
     languageRef.current = code;
-    saveSelectedLanguage(code);
+    saveSelectedLanguage(code, isGuestMode ? undefined : user?.uid, isGuestMode);
     if (user) {
       if (isOnline && !isOfflineSession && isFirebaseAuthActive && auth.currentUser?.uid === user.uid) {
         saveUserPreferencesToFirestore(user.uid, { language: code }).catch(() => {
@@ -706,7 +746,7 @@ function MainApp() {
       if (profile.language && profile.language !== languageRef.current) {
         setLanguage(profile.language);
         languageRef.current = profile.language;
-        saveSelectedLanguage(profile.language);
+        saveSelectedLanguage(profile.language, isGuestMode ? undefined : user?.uid, isGuestMode);
       }
       if (currencyChanged) {
         const targetVersion = persistenceControllerRef.current.incrementMutationVersion();
@@ -1251,6 +1291,10 @@ function MainApp() {
         noExtraDaysSubtitle: t.noExtraDays,
         daysCountSingular: t.daysUnitSingular,
         daysCountPlural: t.daysUnitPlural,
+        daysRangeTemplate: t.daysRangeTemplate,
+        extraDaysFormula: t.extraDaysFormula,
+        weeklyJarFormula: t.weeklyJarFormula,
+        noExtraDaysFormula: t.noExtraDaysFormula,
       },
       activeMonthData.jarAdjustments
     );
@@ -1556,10 +1600,30 @@ function MainApp() {
     deletedFixedIdsRef.current.delete(newExpense.id);
     modifiedFixedIdsRef.current.delete(newExpense.id);
 
-    mutateMonthData(currentKey, currentMonth => ({
-      ...currentMonth,
-      fixedExpenses: [...(currentMonth.fixedExpenses || []), newExpense],
-    }));
+    mutateMonthData(currentKey, currentMonth => {
+      const prevFixed = currentMonth.fixedExpenses || [];
+      const nextFixed = [...prevFixed, newExpense];
+      const [kYear, kMonth] = currentKey.split('-').map(Number);
+      const targetYear = !isNaN(kYear) ? kYear : year;
+      const targetMonth = !isNaN(kMonth) ? kMonth - 1 : month;
+
+      const updatedJarAdjustments = recalculateMonthFixedExpensesWithJarProtection({
+        year: targetYear,
+        month: targetMonth,
+        income: currentMonth.income,
+        savingsRate: currentMonth.savingsRate ?? 0,
+        previousFixedExpenses: prevFixed,
+        nextFixedExpenses: nextFixed,
+        extraDaysPosition: currentMonth.extraDaysPosition || 'end',
+        currentJarAdjustments: currentMonth.jarAdjustments,
+      });
+
+      return {
+        ...currentMonth,
+        fixedExpenses: nextFixed,
+        jarAdjustments: updatedJarAdjustments,
+      };
+    });
   };
 
   const handleDeleteFixedExpense = (id: string) => {
@@ -1567,10 +1631,30 @@ function MainApp() {
     pendingFixedIdsRef.current.delete(id);
     modifiedFixedIdsRef.current.delete(id);
 
-    mutateMonthData(currentKey, currentMonth => ({
-      ...currentMonth,
-      fixedExpenses: (currentMonth.fixedExpenses || []).filter(e => e.id !== id),
-    }));
+    mutateMonthData(currentKey, currentMonth => {
+      const prevFixed = currentMonth.fixedExpenses || [];
+      const nextFixed = prevFixed.filter(e => e.id !== id);
+      const [kYear, kMonth] = currentKey.split('-').map(Number);
+      const targetYear = !isNaN(kYear) ? kYear : year;
+      const targetMonth = !isNaN(kMonth) ? kMonth - 1 : month;
+
+      const updatedJarAdjustments = recalculateMonthFixedExpensesWithJarProtection({
+        year: targetYear,
+        month: targetMonth,
+        income: currentMonth.income,
+        savingsRate: currentMonth.savingsRate ?? 0,
+        previousFixedExpenses: prevFixed,
+        nextFixedExpenses: nextFixed,
+        extraDaysPosition: currentMonth.extraDaysPosition || 'end',
+        currentJarAdjustments: currentMonth.jarAdjustments,
+      });
+
+      return {
+        ...currentMonth,
+        fixedExpenses: nextFixed,
+        jarAdjustments: updatedJarAdjustments,
+      };
+    });
   };
 
   const handleToggleFixedExpensePaid = (id: string, targetMonthKey?: string) => {
@@ -1610,24 +1694,20 @@ function MainApp() {
     mutateMonthData(currentKey, currentMonth => {
       const prevFixed = currentMonth.fixedExpenses || [];
       const nextFixed = prevFixed.map(e => e.id === id ? { ...e, ...updatedFields } : e);
-      const monthIncome = Number(currentMonth.income) || 0;
-      const monthSavings = (monthIncome * (currentMonth.savingsRate ?? 0)) / 100;
-      const prevTotalFixed = prevFixed.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      const nextTotalFixed = nextFixed.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-      const prevRemaining = Math.max(0, monthIncome - prevTotalFixed - monthSavings);
-      const nextRemaining = Math.max(0, monthIncome - nextTotalFixed - monthSavings);
       const [kYear, kMonth] = currentKey.split('-').map(Number);
       const targetYear = !isNaN(kYear) ? kYear : year;
       const targetMonth = !isNaN(kMonth) ? kMonth - 1 : month;
 
-      const updatedJarAdjustments = calculateMidMonthFixedExpenseJarAdjustments(
-        targetYear,
-        targetMonth,
-        prevRemaining,
-        nextRemaining,
-        currentMonth.extraDaysPosition || 'end',
-        currentMonth.jarAdjustments
-      );
+      const updatedJarAdjustments = recalculateMonthFixedExpensesWithJarProtection({
+        year: targetYear,
+        month: targetMonth,
+        income: currentMonth.income,
+        savingsRate: currentMonth.savingsRate ?? 0,
+        previousFixedExpenses: prevFixed,
+        nextFixedExpenses: nextFixed,
+        extraDaysPosition: currentMonth.extraDaysPosition || 'end',
+        currentJarAdjustments: currentMonth.jarAdjustments,
+      });
 
       return {
         ...currentMonth,
@@ -1719,34 +1799,111 @@ function MainApp() {
   const handleCopyFromPreviousMonth = () => {
     const prevMonthData = latestMonthsDataRef.current[previousMonthKey];
     if (!prevMonthData) {
-      alert(t.noPreviousMonthData);
+      setConfirmDialog({
+        type: 'info',
+        title: t.copyPreviousMonthTitle,
+        message: t.noPreviousMonthData,
+      });
       return;
     }
 
-    if (window.confirm(`${t.confirmCopy} (${monthNames[month]} ${year} ← ${monthNames[previousMonthDate.getMonth()]} ${previousMonthDate.getFullYear()})`)) {
-      updateActiveMonth(current => ({
-        ...current,
-        income: prevMonthData.income,
-        extraDaysPosition: prevMonthData.extraDaysPosition,
-        categories: prevMonthData.categories.map(c => ({ ...c })),
-        fixedExpenses: prevMonthData.fixedExpenses.map(f => ({
-          ...f,
-          id: `f_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-          isPaid: false, // Reset paid status for new month
-        })),
-      }));
-    }
+    setConfirmDialog({
+      type: 'copy',
+      title: t.copyPreviousMonthTitle,
+      message: `${t.confirmCopy} (${monthNames[month]} ${year} ← ${monthNames[previousMonthDate.getMonth()]} ${previousMonthDate.getFullYear()})`,
+      confirmLabel: t.copyPreviousMonthBtn.replace('{month}', monthNames[previousMonthDate.getMonth()]),
+    });
   };
 
   // Reset to default template starting at 0
   const handleReset = () => {
-    if (window.confirm(`${t.confirmReset} (${monthNames[month]} ${year})`)) {
-      updateActiveMonth(() => createFreshMonthData());
+    setConfirmDialog({
+      type: 'reset',
+      title: t.resetMonthBtn,
+      message: `${t.confirmReset} (${monthNames[month]} ${year})`,
+      confirmLabel: t.resetMonthBtn,
+    });
+  };
+
+  const handleConfirmDialogAction = () => {
+    if (!confirmDialog) return;
+
+    if (confirmDialog.type === 'copy') {
+      const prevMonthData = latestMonthsDataRef.current[previousMonthKey];
+      if (!prevMonthData) {
+        setConfirmDialog({
+          type: 'info',
+          title: t.copyPreviousMonthTitle,
+          message: t.noPreviousMonthData,
+        });
+        return;
+      }
+
+      const targetDaysInMonth = getDaysInMonth(year, month);
+      const globalCategories = loadGlobalCategories(user?.uid, isGuestMode);
+      const mergedCategoriesMap = new Map<string, CategoryInfo>();
+      (prevMonthData.categories || []).forEach(c => {
+        if (c?.id) mergedCategoriesMap.set(c.id, { ...c });
+      });
+      globalCategories.forEach(c => {
+        if (c?.id) mergedCategoriesMap.set(c.id, { ...c });
+      });
+
+      updateActiveMonth(current => ({
+        ...current,
+        income: prevMonthData.income,
+        savingsRate: prevMonthData.savingsRate ?? 0,
+        extraDaysPosition: prevMonthData.extraDaysPosition,
+        categories: Array.from(mergedCategoriesMap.values()),
+        fixedExpenses: (prevMonthData.fixedExpenses || []).map((f, idx) => ({
+          ...f,
+          id: `f_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 4)}`,
+          dueDate: typeof f.dueDate === 'number'
+            ? Math.min(Math.max(1, f.dueDate), targetDaysInMonth)
+            : f.dueDate,
+          isPaid: false, // Reset paid status for new month
+        })),
+      }));
+      setConfirmDialog(null);
+      return;
     }
+
+    if (confirmDialog.type === 'reset') {
+      const preservedCategories = loadGlobalCategories(user?.uid, isGuestMode);
+      const currentSnapshot = latestMonthsDataRef.current[currentKey];
+      const log = currentSnapshot?.lastJarAdjustmentLog;
+
+      if (log?.transferredToNextMonth && log.nextMonthKey) {
+        const nextKey = log.nextMonthKey;
+        const [nYStr, nMStr] = nextKey.split('-');
+        const nY = parseInt(nYStr, 10);
+        const nM = parseInt(nMStr, 10) - 1;
+
+        mutateMonthData(
+          currentKey,
+          () => createFreshMonthData(preservedCategories),
+          {
+            alsoUpdateKey: nextKey,
+            alsoYear: !isNaN(nY) ? nY : undefined,
+            alsoMonth: !isNaN(nM) ? nM : undefined,
+            alsoUpdater: nextData => ({
+              ...nextData,
+              jarAdjustments: clearOverbudgetJarAdjustments(nextData.jarAdjustments),
+            }),
+          }
+        );
+      } else {
+        updateActiveMonth(() => createFreshMonthData(preservedCategories));
+      }
+      setConfirmDialog(null);
+      return;
+    }
+
+    setConfirmDialog(null);
   };
 
   const handleExportCSV = () => {
-    exportToCSV(year, month, currency, activeMonthData);
+    exportToCSV(year, month, currency, activeMonthData, language);
   };
 
   if (user && !isCloudSyncReady) {
@@ -1757,11 +1914,11 @@ function MainApp() {
         </div>
         <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-wider font-serif">NITA</h2>
         <p className="text-xs text-blue-600 dark:text-blue-400 font-bold mt-1 tracking-widest uppercase">
-          Tus Finanzas, Más Simples
+          {t.authTagline}
         </p>
         <div className="mt-6 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-          <span>Sincronizando tus finanzas...</span>
+          <span>{t.authSyncingFinances}</span>
         </div>
       </div>
     );
@@ -1904,6 +2061,8 @@ function MainApp() {
               nextMonthExpenses={nextMonthExpenses}
               nextMonthYear={nextYear}
               nextMonth={nextMonth}
+              userId={isGuestMode ? undefined : user?.uid}
+              isGuestMode={isGuestMode}
             />
 
             {/* Optional Manual Clone Banner if current month is empty and previous month has data */}
@@ -1943,6 +2102,8 @@ function MainApp() {
               currency={currency}
               currentDay={currentDay}
               language={language}
+              year={year}
+              month={month}
             />
 
             {/* The 5 Frascos Section */}
@@ -2013,6 +2174,51 @@ function MainApp() {
               exactWeeks={4}
               language={language}
             />
+          </div>
+        )}
+
+        {activeTab !== 'all' && (
+          <div className="mb-6 bg-slate-50/80 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 sm:p-4 grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => handleSelectTab('all')}
+              title={t.summaryBarEditIncomeTitle}
+              className="text-left p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70 hover:border-blue-400 dark:hover:border-blue-500 transition-colors cursor-pointer"
+            >
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                {t.netIncome}
+              </div>
+              <div className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5 tabular-nums truncate">
+                {formatCurrency(income, currency)}
+              </div>
+            </button>
+
+            <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                {t.savingsBarTitle}
+              </div>
+              <div className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums truncate">
+                {savingsRate}% · {formatCurrency(totalSavings, currency)}
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                {t.fixedTotalMonthly}
+              </div>
+              <div className="text-sm sm:text-base font-black text-blue-600 dark:text-blue-400 mt-0.5 tabular-nums truncate">
+                {formatCurrency(totalFixedExpenses, currency)}
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                {t.variableBalanceLabel}
+              </div>
+              <div className="text-sm sm:text-base font-black text-indigo-600 dark:text-indigo-400 mt-0.5 tabular-nums truncate">
+                {formatCurrency(monthlyRemaining, currency)}
+              </div>
+            </div>
           </div>
         )}
 
@@ -2104,7 +2310,7 @@ function MainApp() {
 
       {/* Mobile Bottom Fixed Navigation Bar (Visible únicamente en versión móvil, siempre fija en la parte inferior al desplazarse) */}
       <nav 
-        aria-label="Navegación móvil"
+        aria-label={t.mobileNavAria}
         className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/90 dark:border-slate-800 px-4 py-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_20px_rgba(0,0,0,0.08)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.3)] transition-colors"
       >
         <div className="max-w-md mx-auto flex items-center justify-between gap-1">
@@ -2192,14 +2398,85 @@ function MainApp() {
         language={language}
       />
 
+      {/* In-app Confirmation & Info Modal (replaces native browser alert/confirm) */}
+      {confirmDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="nita-confirm-dialog-title"
+          onClick={() => setConfirmDialog(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-5 sm:p-6 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl shrink-0 ${
+                  confirmDialog.type === 'reset'
+                    ? 'bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400'
+                    : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400'
+                }`}>
+                  {confirmDialog.type === 'reset' ? (
+                    <AlertTriangle className="w-5 h-5" />
+                  ) : (
+                    <Info className="w-5 h-5" />
+                  )}
+                </div>
+                <h3
+                  id="nita-confirm-dialog-title"
+                  className="text-base font-black text-slate-900 dark:text-white"
+                >
+                  {confirmDialog.title}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label={t.closeModal}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              {confirmDialog.message}
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              {confirmDialog.type !== 'info' && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDialog(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                >
+                  {t.cancel}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleConfirmDialogAction}
+                className={`px-4 py-2 rounded-xl text-xs font-black text-white transition-colors cursor-pointer shadow-xs ${
+                  confirmDialog.type === 'reset'
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {confirmDialog.type === 'info' ? t.understood : (confirmDialog.confirmLabel || t.understood)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Auto-update toast notification */}
       {showUpdateNotice && (
         <div className="fixed bottom-24 sm:bottom-5 right-5 z-50 bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-300 max-w-sm">
           <Sparkles className="w-5 h-5 text-emerald-200 shrink-0" />
           <div className="flex-1 text-xs sm:text-sm font-bold">
-            {language === 'en' 
-              ? 'NITA updated automatically to the latest version!' 
-              : '¡NITA se actualizó automáticamente a la última versión!'}
+            {t.appAutoUpdatedToast}
           </div>
           <button 
             type="button" 
@@ -2218,6 +2495,7 @@ function MainApp() {
 
 function AppShell() {
   const { user, isGuestMode, loading: isAuthLoading } = useAuth();
+  const shellT = getTranslations(loadSelectedLanguage(isGuestMode ? undefined : user?.uid, isGuestMode));
 
   if (isAuthLoading) {
     return (
@@ -2227,11 +2505,11 @@ function AppShell() {
         </div>
         <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-wider font-serif">NITA</h2>
         <p className="text-xs text-blue-600 dark:text-blue-400 font-bold mt-1 tracking-widest uppercase">
-          Tus Finanzas, Más Simples
+          {shellT.authTagline}
         </p>
         <div className="mt-6 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-          <span>Iniciando sesión segura...</span>
+          <span>{shellT.authSecureLoginLoading}</span>
         </div>
       </div>
     );

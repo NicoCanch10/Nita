@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FixedExpense, CurrencyCode } from '../types/budget';
 import { 
   getExpenseNotifications, 
@@ -23,6 +23,8 @@ interface DueAlertBannerProps {
   nextMonthExpenses?: FixedExpense[];
   nextMonthYear?: number;
   nextMonth?: number;
+  userId?: string | null;
+  isGuestMode?: boolean;
 }
 
 export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
@@ -37,6 +39,8 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
   nextMonthExpenses,
   nextMonthYear,
   nextMonth,
+  userId,
+  isGuestMode,
 }) => {
   const t = getTranslations(language);
   const [isDismissedSession, setIsDismissedSession] = useState(false);
@@ -45,6 +49,10 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
   const activeYear = year !== undefined && year !== null ? year : now.getFullYear();
   const activeMonth = month !== undefined && month !== null ? month : now.getMonth();
   const activeDay = currentDay ?? now.getDate();
+
+  useEffect(() => {
+    setIsDismissedSession(false);
+  }, [activeYear, activeMonth]);
 
   // If user disabled alerts in settings or dismissed in current session
   if (!alertSettings.enabled || isDismissedSession) {
@@ -73,7 +81,7 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
     }
     if (n.type === 'in_3_days' || n.type === 'upcoming') {
       // Check if user previously closed the preventive notice for this expense in its specific month
-      if (isPreventiveAlertDismissed(n.expenseId, n.dueDate, n.targetYear ?? activeYear, n.targetMonth ?? activeMonth)) {
+      if (isPreventiveAlertDismissed(n.expenseId, n.dueDate, n.targetYear ?? activeYear, n.targetMonth ?? activeMonth, userId, isGuestMode)) {
         return false;
       }
       return true;
@@ -93,7 +101,7 @@ export const DueAlertBanner: React.FC<DueAlertBannerProps> = ({
     // Remember any preventive notice so that it won't appear again until the day of the due date
     const advanceItems = critical.filter(n => n.type === 'in_3_days' || n.type === 'upcoming');
     advanceItems.forEach(item => {
-      dismissPreventiveAlert(item.expenseId, item.dueDate, item.targetYear ?? activeYear, item.targetMonth ?? activeMonth);
+      dismissPreventiveAlert(item.expenseId, item.dueDate, item.targetYear ?? activeYear, item.targetMonth ?? activeMonth, userId, isGuestMode);
     });
 
     setIsDismissedSession(true);

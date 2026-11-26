@@ -533,7 +533,7 @@ const STEPS_EN: StepInfo[] = [
     highlights: [
       {
         title: 'Add fixed expense and due date',
-        desc: 'Tap “CARGAR +” in Fixed Expenses and enter concept, amount, category, and due date in the monthly calendar.',
+        desc: 'Tap “ADD +” in Fixed Expenses and enter concept, amount, category, and due date in the monthly calendar.',
         icon: Calendar,
       },
       {
@@ -587,7 +587,7 @@ const STEPS_EN: StepInfo[] = [
     highlights: [
       {
         title: 'Add date, amount, and category',
-        desc: 'Tap “CARGAR +” in Daily Expenses, enter description, amount, category, and pick the date in the current month calendar.',
+        desc: 'Tap “ADD +” in Daily Expenses, enter description, amount, category, and pick the date in the current month calendar.',
         icon: ShoppingBag,
       },
       {
@@ -695,7 +695,7 @@ const STEPS_CA: StepInfo[] = [
     highlights: [
       {
         title: 'Afegir despesa fixa i venciment',
-        desc: 'Toca «CARGAR +» a Despeses Fixes i introdueix concepte, import, categoria i data al calendari del mes.',
+        desc: 'Toca «AFEGIR +» a Despeses Fixes i introdueix concepte, import, categoria i data al calendari del mes.',
         icon: Calendar,
       },
       {
@@ -749,7 +749,7 @@ const STEPS_CA: StepInfo[] = [
     highlights: [
       {
         title: 'Afegir data, import i categoria',
-        desc: 'Toca «CARGAR +» a Consums Diaris, completa descripció, import, categoria i tria la data al calendari del mes.',
+        desc: 'Toca «AFEGIR +» a Consums Diaris, completa descripció, import, categoria i tria la data al calendari del mes.',
         icon: ShoppingBag,
       },
       {
@@ -857,7 +857,7 @@ const STEPS_PT: StepInfo[] = [
     highlights: [
       {
         title: 'Adicionar gasto fixo e vencimento',
-        desc: 'Toque em «CARGAR +» em Gastos Fixos e informe descrição, valor, categoria e data no calendário do mês.',
+        desc: 'Toque em «ADICIONAR +» em Gastos Fixos e informe descrição, valor, categoria e data no calendário do mês.',
         icon: Calendar,
       },
       {
@@ -911,7 +911,7 @@ const STEPS_PT: StepInfo[] = [
     highlights: [
       {
         title: 'Informar data, valor e categoria',
-        desc: 'Toque em «CARGAR +» em Gastos Diários, preencha descrição, valor, categoria e escolha a data no calendário.',
+        desc: 'Toque em «ADICIONAR +» em Gastos Diários, preencha descrição, valor, categoria e escolha a data no calendário.',
         icon: ShoppingBag,
       },
       {
@@ -1019,7 +1019,7 @@ const STEPS_FR: StepInfo[] = [
     highlights: [
       {
         title: 'Ajouter dépense fixe et échéance',
-        desc: 'Touchez « CARGAR + » dans Dépenses Fixes et saisissez libellé, montant, catégorie et date dans le calendrier.',
+        desc: 'Touchez « AJOUTER + » dans Dépenses Fixes et saisissez libellé, montant, catégorie et date dans le calendrier.',
         icon: Calendar,
       },
       {
@@ -1073,7 +1073,7 @@ const STEPS_FR: StepInfo[] = [
     highlights: [
       {
         title: 'Saisir date, montant et catégorie',
-        desc: 'Touchez « CARGAR + » dans Dépenses Quotidiennes, saisissez libellé, montant, catégorie et la date dans le calendrier.',
+        desc: 'Touchez « AJOUTER + » dans Dépenses Quotidiennes, saisissez libellé, montant, catégorie et la date dans le calendrier.',
         icon: ShoppingBag,
       },
       {
@@ -1181,7 +1181,7 @@ const STEPS_IT: StepInfo[] = [
     highlights: [
       {
         title: 'Aggiungi spesa fissa e scadenza',
-        desc: 'Tocca «CARGAR +» in Spese Fisse e inserisci descrizione, importo, categoria e data nel calendario del mese.',
+        desc: 'Tocca «AGGIUNGI +» in Spese Fisse e inserisci descrizione, importo, categoria e data nel calendario del mese.',
         icon: Calendar,
       },
       {
@@ -1235,7 +1235,7 @@ const STEPS_IT: StepInfo[] = [
     highlights: [
       {
         title: 'Inserisci data, importo e categoria',
-        desc: 'Tocca «CARGAR +» in Spese Giornaliere, inserisci descrizione, importo, categoria e scegli la data nel calendario.',
+        desc: 'Tocca «AGGIUNGI +» in Spese Giornaliere, inserisci descrizione, importo, categoria e scegli la data nel calendario.',
         icon: ShoppingBag,
       },
       {
@@ -1343,7 +1343,7 @@ const STEPS_DE: StepInfo[] = [
     highlights: [
       {
         title: 'Fixkosten und Fälligkeit erfassen',
-        desc: 'Tippen Sie auf „CARGAR +“ bei Fixkosten und geben Sie Zweck, Betrag, Kategorie und Datum im Kalender ein.',
+        desc: 'Tippen Sie auf „HINZUFÜGEN +“ bei Fixkosten und geben Sie Zweck, Betrag, Kategorie und Datum im Kalender ein.',
         icon: Calendar,
       },
       {
@@ -1397,7 +1397,7 @@ const STEPS_DE: StepInfo[] = [
     highlights: [
       {
         title: 'Datum, Betrag und Kategorie wählen',
-        desc: 'Tippen Sie bei Täglichen Ausgaben auf „CARGAR +“, füllen Sie Beschreibung, Betrag, Kategorie und Kalenderdatum aus.',
+        desc: 'Tippen Sie bei Täglichen Ausgaben auf „HINZUFÜGEN +“, füllen Sie Beschreibung, Betrag, Kategorie und Kalenderdatum aus.',
         icon: ShoppingBag,
       },
       {

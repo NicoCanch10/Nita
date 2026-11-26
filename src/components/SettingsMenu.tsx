@@ -39,7 +39,9 @@ import {
   Eye,
   EyeOff,
   AlertCircle,
-  Loader2
+  Loader2,
+  Download,
+  RotateCcw
 } from 'lucide-react';
 import { validatePasswordFormat } from '../services/authAccountService';
 
@@ -64,6 +66,7 @@ interface SettingsMenuProps {
   onForceCleanReload?: () => void;
   onManualSync?: () => Promise<void> | void;
   isSyncingManual?: boolean;
+  initialOpen?: boolean;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
@@ -87,8 +90,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onForceCleanReload,
   onManualSync,
   isSyncingManual = false,
+  initialOpen = false,
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(initialOpen);
   const menuRef = useRef<HTMLDivElement>(null);
   const { isInstalled } = usePWAInstall();
   const { user, signOutUser, changePassword, isGuestMode, exitGuestMode, isFirebaseAuthActive, isOnline, isOfflineSession } = useAuth();
@@ -103,50 +107,21 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [changePasswordSuccess, setChangePasswordSuccess] = useState<string | null>(null);
   const isNitaPasswordAccount = Boolean(user && user.uid.startsWith('usr_'));
-
-  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setChangePasswordError(null);
-    setChangePasswordSuccess(null);
-
-    if (!currentPasswordInput) {
-      setChangePasswordError('Por favor, ingresa tu contraseña actual.');
-      return;
-    }
-
-    const passCheck = validatePasswordFormat(newPasswordInput);
-    if (!passCheck.valid) {
-      setChangePasswordError(passCheck.error || 'La nueva contraseña no es válida.');
-      return;
-    }
-
-    if (newPasswordInput !== confirmNewPasswordInput) {
-      setChangePasswordError('Las nuevas contraseñas no coinciden.');
-      return;
-    }
-
-    try {
-      setIsChangingPassword(true);
-      await changePassword(currentPasswordInput, newPasswordInput);
-      setCurrentPasswordInput('');
-      setNewPasswordInput('');
-      setConfirmNewPasswordInput('');
-      setChangePasswordSuccess('Contraseña actualizada. Tu sesión actual sigue activa y otras sesiones fueron cerradas.');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'No se pudo cambiar la contraseña.';
-      setChangePasswordError(msg);
-    } finally {
-      setIsChangingPassword(false);
-    }
-  };
+  const scopedUserId = isGuestMode ? undefined : user?.uid;
 
   // Language state
-  const [internalLanguage, setInternalLanguage] = useState(() => loadSelectedLanguage());
+  const [internalLanguage, setInternalLanguage] = useState(() =>
+    loadSelectedLanguage(scopedUserId, isGuestMode)
+  );
   const selectedLanguage = propLanguage || internalLanguage;
   const t = getTranslations(selectedLanguage);
 
+  useEffect(() => {
+    setInternalLanguage(loadSelectedLanguage(scopedUserId, isGuestMode));
+  }, [scopedUserId, isGuestMode]);
+
   const sortedLanguages = [...AVAILABLE_LANGUAGES].sort((a, b) =>
-    a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+    a.name.localeCompare(b.name, selectedLanguage || 'es', { sensitivity: 'base' })
   );
 
   const [isLangDropdownOpen, setIsLangDropdownOpen] = useState(false);
@@ -155,7 +130,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
   const handleLanguageChange = (code: string) => {
     setInternalLanguage(code);
-    saveSelectedLanguage(code);
+    saveSelectedLanguage(code, scopedUserId, isGuestMode);
     setIsLangDropdownOpen(false);
     if (propOnLanguageChange) {
       propOnLanguageChange(code);
@@ -164,8 +139,14 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
   // Alert settings state
   const [internalAlertSettings, setInternalAlertSettings] = useState<DueDateAlertSettings>(() => {
-    return propAlertSettings ?? loadAlertSettings();
+    return propAlertSettings ?? loadAlertSettings(scopedUserId, isGuestMode);
   });
+
+  useEffect(() => {
+    if (!propAlertSettings) {
+      setInternalAlertSettings(loadAlertSettings(scopedUserId, isGuestMode));
+    }
+  }, [scopedUserId, isGuestMode, propAlertSettings]);
 
   const activeAlertSettings = propAlertSettings ?? internalAlertSettings;
 
@@ -181,12 +162,48 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     }
   }, [activeAlertSettings.daysInAdvance, isDaysInputFocused]);
 
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePasswordError(null);
+    setChangePasswordSuccess(null);
+
+    if (!currentPasswordInput) {
+      setChangePasswordError(t.accountPasswordMissingCurrent);
+      return;
+    }
+
+    const passCheck = validatePasswordFormat(newPasswordInput);
+    if (!passCheck.valid) {
+      setChangePasswordError(passCheck.error || t.accountPasswordInvalidNew);
+      return;
+    }
+
+    if (newPasswordInput !== confirmNewPasswordInput) {
+      setChangePasswordError(t.accountPasswordMismatch);
+      return;
+    }
+
+    try {
+      setIsChangingPassword(true);
+      await changePassword(currentPasswordInput, newPasswordInput);
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmNewPasswordInput('');
+      setChangePasswordSuccess(t.accountPasswordUpdated);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : t.accountPasswordFailed;
+      setChangePasswordError(msg);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   const handleToggleAlertsEnabled = () => {
     const updated = {
       ...activeAlertSettings,
       enabled: !activeAlertSettings.enabled,
     };
-    saveAlertSettings(updated);
+    saveAlertSettings(updated, scopedUserId, isGuestMode);
     setInternalAlertSettings(updated);
     if (onAlertSettingsChange) onAlertSettingsChange(updated);
   };
@@ -197,7 +214,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       ...activeAlertSettings,
       daysInAdvance: clamped,
     };
-    saveAlertSettings(updated);
+    saveAlertSettings(updated, scopedUserId, isGuestMode);
     setInternalAlertSettings(updated);
     if (onAlertSettingsChange) onAlertSettingsChange(updated);
   };
@@ -227,8 +244,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700 shadow-2xs flex items-center justify-center"
-        title="Configuración de la aplicación"
-        aria-label="Configuración"
+        title={t.settingsButtonTitle}
+        aria-label={t.settingsButtonAria}
       >
         <Settings className={`w-4 h-4 text-slate-700 dark:text-slate-300 ${isOpen ? 'rotate-90 transition-transform' : ''}`} />
         {updateAvailable && (
@@ -405,7 +422,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   }`}
                   role="switch"
                   aria-checked={activeAlertSettings.enabled}
-                  title={activeAlertSettings.enabled ? 'Desactivar avisos' : 'Activar avisos'}
+                  title={activeAlertSettings.enabled ? t.toggleAlertsOnTitle : t.toggleAlertsOffTitle}
                 >
                   <span
                     className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
@@ -551,7 +568,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     {isUpdating ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                        <span>Actualizando NITA...</span>
+                        <span>{t.updatingNita}</span>
                       </>
                     ) : (
                       <>
@@ -572,7 +589,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     className="w-full min-h-[44px] flex items-center justify-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 active:bg-slate-200 dark:active:bg-slate-700 active:scale-[0.98] disabled:opacity-75 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 rounded-xl font-bold text-2xs sm:text-xs transition-all cursor-pointer border border-slate-200 dark:border-slate-700 touch-manipulation select-none"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate || isUpdating ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
-                    <span>{isUpdating ? 'Actualizando NITA...' : isCheckingUpdate ? t.checkingBtn : t.checkForUpdatesBtn}</span>
+                    <span>{isUpdating ? t.updatingNita : isCheckingUpdate ? t.checkingBtn : t.checkForUpdatesBtn}</span>
                   </button>
                   {lastUpdateMessage && (
                     <div className="flex items-center justify-center gap-1.5 text-2xs text-emerald-700 dark:text-emerald-400 text-center pt-0.5 font-medium animate-in fade-in duration-200">
@@ -590,7 +607,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       disabled={isCheckingUpdate || isUpdating}
                       className="w-full text-center text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline underline-offset-2 pt-1 transition-colors cursor-pointer touch-manipulation active:scale-[0.98]"
                     >
-                      ¿Problemas al actualizar en móvil? Forzar recarga limpia
+                      {t.forceCleanReloadBtn}
                     </button>
                   )}
                 </div>
@@ -603,38 +620,38 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 <label className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-between uppercase tracking-wider text-2xs">
                   <span className="flex items-center gap-1.5">
                     <Cloud className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Cuenta y Sincronización</span>
+                    <span>{t.accountSyncTitle}</span>
                   </span>
                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                     isFirebaseAuthActive 
                       ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/70' 
                       : 'text-amber-700 dark:text-amber-400 bg-amber-100/80 dark:bg-amber-950/70'
                   }`}>
-                    {isFirebaseAuthActive ? 'EN LÍNEA ✓' : 'SIN CONEXIÓN'}
+                    {isFirebaseAuthActive ? t.statusOnlineBadge : t.statusOfflineBadge}
                   </span>
                 </label>
                 <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-2 text-2xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-500 dark:text-slate-400">Usuario:</span>
+                    <span className="text-slate-500 dark:text-slate-400">{t.accountUserLabel}</span>
                     <span className="font-bold text-slate-900 dark:text-white truncate max-w-[160px]">
-                      {user.displayName || user.email || 'Usuario'}
+                      {user.displayName || user.email || t.accountUserFallback}
                     </span>
                   </div>
                   {user.email && (
                     <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[10px]">
-                      <span className="text-slate-500 dark:text-slate-400">Correo:</span>
+                      <span className="text-slate-500 dark:text-slate-400">{t.accountEmailLabel}</span>
                       <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[160px]">
                         {user.email}
                       </span>
                     </div>
                   )}
                   <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 dark:border-slate-700/50 text-[10px]">
-                    <span className="text-slate-500 dark:text-slate-400">Estado:</span>
+                    <span className="text-slate-500 dark:text-slate-400">{t.accountStatusLabel}</span>
                     <div className="flex items-center gap-1.5 font-bold">
                       {isFirebaseAuthActive ? (
-                        <span className="text-emerald-600 dark:text-emerald-400">Sincronización activa ✓</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{t.accountSyncActive}</span>
                       ) : (
-                        <span className="text-amber-600 dark:text-amber-400">Guardado local</span>
+                        <span className="text-amber-600 dark:text-amber-400">{t.accountSavedLocal}</span>
                       )}
                     </div>
                   </div>
@@ -650,7 +667,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-extrabold rounded-xl transition-all cursor-pointer text-2xs shadow-xs disabled:opacity-60"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isSyncingManual ? 'animate-spin' : ''}`} />
-                    <span>{isSyncingManual ? 'Sincronizando con la nube...' : 'Sincronizar datos ahora'}</span>
+                    <span>{isSyncingManual ? t.accountSyncingCloud : t.accountSyncNowBtn}</span>
                   </button>
                 )}
 
@@ -666,7 +683,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                       className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 font-bold rounded-xl transition-colors cursor-pointer text-2xs border border-slate-200 dark:border-slate-700"
                     >
                       <KeyRound className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>{isChangePasswordOpen ? 'Ocultar cambio de contraseña' : 'Cambiar contraseña'}</span>
+                      <span>{isChangePasswordOpen ? t.accountHidePasswordBtn : t.accountChangePasswordBtn}</span>
                     </button>
 
                     {isChangePasswordOpen && (
@@ -689,13 +706,13 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
                         {(!isOnline || isOfflineSession || !isFirebaseAuthActive) && (
                           <p className="text-3xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl p-2">
-                            Necesitas conexión a internet y sesión activa para cambiar tu contraseña.
+                            {t.accountPasswordOfflineWarn}
                           </p>
                         )}
 
                         <div className="space-y-1">
                           <label className="text-3xs font-bold text-slate-600 dark:text-slate-300">
-                            Contraseña actual
+                            {t.accountCurrentPassword}
                           </label>
                           <div className="relative">
                             <input
@@ -722,7 +739,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
                         <div className="space-y-1">
                           <label className="text-3xs font-bold text-slate-600 dark:text-slate-300">
-                            Nueva contraseña (mín. 6 caracteres)
+                            {t.accountNewPasswordLabel}
                           </label>
                           <input
                             type={showChangePasswords ? 'text' : 'password'}
@@ -740,7 +757,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
                         <div className="space-y-1">
                           <label className="text-3xs font-bold text-slate-600 dark:text-slate-300">
-                            Confirmar nueva contraseña
+                            {t.accountConfirmNewPassword}
                           </label>
                           <input
                             type={showChangePasswords ? 'text' : 'password'}
@@ -764,12 +781,12 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                           {isChangingPassword ? (
                             <>
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>Actualizando contraseña...</span>
+                              <span>{t.accountUpdatingPasswordBtn}</span>
                             </>
                           ) : (
                             <>
                               <KeyRound className="w-3.5 h-3.5" />
-                              <span>Guardar nueva contraseña</span>
+                              <span>{t.accountSaveNewPasswordBtn}</span>
                             </>
                           )}
                         </button>
@@ -787,7 +804,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 font-bold rounded-xl transition-colors cursor-pointer text-2xs border border-rose-200 dark:border-rose-900/60"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Cerrar sesión</span>
+                  <span>{t.accountSignOutBtn}</span>
                 </button>
               </div>
             ) : isGuestMode ? (
@@ -795,18 +812,18 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 <label className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-between uppercase tracking-wider text-2xs">
                   <span className="flex items-center gap-1.5">
                     <Cloud className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-                    <span>Cuenta y Sincronización</span>
+                    <span>{t.accountSyncTitle}</span>
                   </span>
                   <span className="text-[9px] text-amber-700 dark:text-amber-400 font-bold bg-amber-100/80 dark:bg-amber-950/70 px-1.5 py-0.5 rounded">
-                    MODO LOCAL
+                    {t.statusLocalModeBadge}
                   </span>
                 </label>
                 <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-1.5 text-2xs">
                   <p className="font-bold text-slate-800 dark:text-slate-200">
-                    Estás usando NITA sin cuenta
+                    {t.accountGuestHeading}
                   </p>
                   <p className="text-slate-500 dark:text-slate-400 text-3xs leading-relaxed">
-                    Tus datos se guardan únicamente en este navegador. Para respaldar y sincronizar entre tu computadora y celular, inicia sesión con Google o crea tu cuenta con usuario y contraseña.
+                    {t.accountGuestDesc}
                   </p>
                 </div>
                 <button
@@ -818,12 +835,47 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition-colors cursor-pointer text-2xs shadow-xs"
                 >
                   <Cloud className="w-3.5 h-3.5" />
-                  <span>Iniciar sesión / Crear cuenta</span>
+                  <span>{t.accountSignInCreateBtn}</span>
                 </button>
               </div>
             ) : null}
 
-            {/* 8. Instructivo y Guía Paso a Paso */}
+            {/* 8. Gestión de Datos del Mes (CSV / Restablecer) */}
+            {(onExport || onReset) && (
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {onExport && (
+                  <button
+                    type="button"
+                    data-testid="settings-export-csv-btn"
+                    onClick={() => {
+                      setIsOpen(false);
+                      onExport();
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-colors cursor-pointer text-2xs border border-slate-200 dark:border-slate-700 shadow-2xs"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="truncate">{t.exportCsvBtn}</span>
+                  </button>
+                )}
+
+                {onReset && (
+                  <button
+                    type="button"
+                    data-testid="settings-reset-month-btn"
+                    onClick={() => {
+                      setIsOpen(false);
+                      onReset();
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 font-bold rounded-xl transition-colors cursor-pointer text-2xs border border-rose-200 dark:border-rose-900/60 shadow-2xs"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{t.resetMonthBtn}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* 9. Instructivo y Guía Paso a Paso */}
             <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
@@ -842,7 +894,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             <div className="pt-2 pb-10 mb-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-2xs text-slate-400 dark:text-slate-500">
               <span className="font-semibold">NITA</span>
               <span className="font-bold tabular-nums tracking-wide">
-                Versión {APP_VERSION}
+                {t.versionLabel.replace('{version}', APP_VERSION)}
               </span>
             </div>
 

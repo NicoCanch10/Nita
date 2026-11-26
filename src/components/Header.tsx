@@ -90,7 +90,9 @@ export const Header: React.FC<HeaderProps> = ({
   const rawDisplayName = user?.displayName?.trim() || '';
   const firstName = rawDisplayName ? rawDisplayName.split(/\s+/)[0] : '';
   const userName = firstName || user?.email?.split('@')[0]?.trim() || '';
-  const headerGreeting = !isGuestMode && userName ? `¡Hola, ${userName}!` : t.appTitle;
+  const headerGreeting = !isGuestMode && userName
+    ? t.headerGreeting.replace('{name}', userName)
+    : t.appTitle;
 
   const handlePrevMonth = () => {
     if (month === 0) {
@@ -110,7 +112,9 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const years = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
+  const minYear = Math.min(2024, year - 2);
+  const maxYear = Math.max(2030, year + 2);
+  const years = Array.from({ length: maxYear - minYear + 1 }, (_, idx) => minYear + idx);
 
   return (
     <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-colors">
@@ -121,7 +125,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 text-xs text-center sm:text-left">
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white font-black text-3xs shrink-0">!</span>
               <span>
-                <strong>Modo Local (Sin cuenta en este dispositivo):</strong> Tus datos están guardados solo en este dispositivo.
+                <strong>{t.guestBannerTitle}</strong> {t.guestBannerDesc}
               </span>
             </div>
             <button
@@ -130,7 +134,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-extrabold text-xs shadow-xs cursor-pointer transition-all shrink-0"
             >
               <Cloud className="w-3.5 h-3.5 shrink-0" />
-              <span>Iniciar sesión o Crear cuenta para sincronizar</span>
+              <span>{t.guestBannerAction}</span>
             </button>
           </div>
         </div>
@@ -216,6 +220,8 @@ export const Header: React.FC<HeaderProps> = ({
               nextMonthExpenses={nextMonthExpenses}
               nextMonthYear={nextMonthYear}
               nextMonth={nextMonth}
+              userId={isGuestMode ? undefined : user?.uid}
+              isGuestMode={isGuestMode}
             />
 
             {/* Settings Gear Button (Rueda de configuraciones con Modo Oscuro/Blanco, App, Actualizaciones, Avisos de vencimientos, etc.) */}

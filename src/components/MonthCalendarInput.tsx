@@ -113,6 +113,25 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
     return !isNaN(parsed) && parsed >= 1 && parsed <= daysInMonth ? parsed : null;
   })();
 
+  const [focusedDay, setFocusedDay] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setFocusedDay(selectedDay ?? (isTodayInActiveMonth ? todayDay : 1));
+    } else {
+      setFocusedDay(null);
+    }
+  }, [isOpen, selectedDay, isTodayInActiveMonth, todayDay]);
+
+  const focusDayButton = useCallback((day: number) => {
+    const clamped = Math.min(daysInMonth, Math.max(1, day));
+    setFocusedDay(clamped);
+    const dayBtn = popoverRef.current?.querySelector<HTMLButtonElement>(
+      `button[data-calendar-day="${clamped}"]`
+    );
+    dayBtn?.focus();
+  }, [daysInMonth]);
+
   const formattedDisplayValue = value.trim() ? formatNumericDateByLanguage(value.trim(), language) : '';
 
   const closeCalendar = useCallback((restoreInputFocus = false) => {
@@ -306,7 +325,23 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
               key={day}
               type="button"
               data-calendar-day={day}
+              onFocus={() => setFocusedDay(day)}
               onClick={() => handleSelectDay(day)}
+              onKeyDown={(e) => {
+                let targetDay: number | null = null;
+                if (e.key === 'ArrowLeft') targetDay = day - 1;
+                else if (e.key === 'ArrowRight') targetDay = day + 1;
+                else if (e.key === 'ArrowUp') targetDay = day - 7;
+                else if (e.key === 'ArrowDown') targetDay = day + 7;
+                else if (e.key === 'Home') targetDay = 1;
+                else if (e.key === 'End') targetDay = daysInMonth;
+
+                if (targetDay !== null) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  focusDayButton(targetDay);
+                }
+              }}
               className={`h-8 rounded-lg text-xs tabular-nums flex items-center justify-center transition-colors cursor-pointer ${
                 isSelected
                   ? selectedDayClass
@@ -366,9 +401,12 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
       <input
         ref={inputRef}
         type="text"
-        readOnly
+        inputMode="none"
         required={required}
         value={formattedDisplayValue}
+        onChange={() => {}}
+        onBeforeInput={(e) => e.preventDefault()}
+        onPaste={(e) => e.preventDefault()}
         placeholder={labels.optionalPlaceholder}
         lang={language}
         data-min={monthMinDate}
@@ -411,16 +449,29 @@ export const MonthCalendarInput: React.FC<MonthCalendarInputProps> = ({
           setIsOpen(!wasOpen);
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+          if (e.key === 'Enter') {
             e.preventDefault();
             if (!isOpen) {
               setIsOpen(true);
-            } else if (e.key === 'ArrowDown') {
-              const targetDay = selectedDay ?? (isTodayInActiveMonth ? todayDay : 1);
-              const dayBtn = popoverRef.current?.querySelector<HTMLButtonElement>(
-                `button[data-calendar-day="${targetDay}"]`
-              );
-              dayBtn?.focus();
+            } else {
+              const targetDay = focusedDay ?? selectedDay ?? (isTodayInActiveMonth ? todayDay : 1);
+              handleSelectDay(targetDay);
+            }
+          } else if (e.key === ' ') {
+            e.preventDefault();
+            if (!isOpen) {
+              setIsOpen(true);
+            }
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const targetDay = focusedDay ?? selectedDay ?? (isTodayInActiveMonth ? todayDay : 1);
+            if (!isOpen) {
+              setIsOpen(true);
+              if (typeof requestAnimationFrame !== 'undefined') {
+                requestAnimationFrame(() => focusDayButton(targetDay));
+              }
+            } else {
+              focusDayButton(targetDay);
             }
           }
         }}

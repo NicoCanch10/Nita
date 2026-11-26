@@ -106,10 +106,21 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
   const [editCategory, setEditCategory] = useState<string>('');
   const [editDate, setEditDate] = useState<string>('');
 
-  // Sync date when the active month/year changes
+  // Sync date and close transient modals when the active month/year changes
   useEffect(() => {
     setDate(getDefaultExpenseDate(year, month, daysInMonth));
+    setIsAddModalOpen(false);
+    setEditingExpenseId(null);
+    setDescription('');
+    setAmount('');
   }, [year, month, daysInMonth]);
+
+  // Reset category filter if the currently selected custom category was deleted
+  useEffect(() => {
+    if (categoryFilter !== 'all' && !categories.some(c => c.id === categoryFilter)) {
+      setCategoryFilter('all');
+    }
+  }, [categories, categoryFilter]);
 
   useEffect(() => {
     if (!editingExpenseId && !isAddModalOpen) return;
@@ -237,15 +248,18 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
     return labelA.localeCompare(labelB, undefined, { sensitivity: 'base' });
   });
 
-  const filteredExpenses = expenses
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+
+  const filteredExpenses = safeExpenses
     .filter(item => {
-      const matchesSearch = item.description.toLowerCase().includes(searchQuery.toLowerCase());
+      if (!item) return false;
+      const matchesSearch = String(item.description || '').toLowerCase().includes(searchQuery.toLowerCase().trim());
       const matchesCat = categoryFilter === 'all' || item.category === categoryFilter;
       return matchesSearch && matchesCat;
     })
-    .sort((a, b) => b.date.localeCompare(a.date));
+    .sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')));
 
-  const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalSpent = safeExpenses.reduce((sum, e) => sum + (Number(e?.amount) || 0), 0);
   const averageSpentPerDay = daysInMonth > 0 ? (totalSpent / daysInMonth) : 0;
 
   return (
@@ -303,7 +317,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
           data-testid="daily-expenses-add-trigger"
           className="w-full sm:w-auto sm:min-w-[200px] min-h-[42px] inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2.5 px-5 sm:px-8 rounded-xl transition-all shadow-xs cursor-pointer whitespace-nowrap shrink-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
         >
-          <span>CARGAR +</span>
+          <span>{t.addExpenseTriggerBtn}</span>
         </button>
       </div>
 
@@ -348,7 +362,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
           onClick={handleOpenAddModal}
           className="hidden md:inline-flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs sm:text-sm font-black tracking-wide py-2 px-6 md:min-w-[175px] lg:w-full lg:max-w-[270px] xl:max-w-[320px] rounded-xl transition-all shadow-sm cursor-pointer whitespace-nowrap shrink-0 lg:justify-self-end focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40"
         >
-          <span>CARGAR +</span>
+          <span>{t.addExpenseTriggerBtn}</span>
         </button>
 
       </div>
@@ -410,7 +424,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                     <button
                       type="button"
                       onClick={() => startEditExpense(expense)}
-                      title="Editar gasto (descripción, monto, categoría o fecha)"
+                      title={t.editDailyTooltip}
                       className="p-1.5 sm:p-2 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 rounded-xl transition-colors cursor-pointer"
                     >
                       <Pencil className="w-4 h-4 sm:w-[17px] sm:h-[17px]" />
@@ -439,7 +453,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
           onClick={handleCloseAddModal}
           role="dialog"
           aria-modal="true"
-          aria-label="Cargar Gasto Variable"
+          aria-label={t.addDailyModalTitle}
         >
           <form
             onClick={(e) => e.stopPropagation()}
@@ -451,12 +465,12 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                 <span className="p-1.5 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
                   <Plus className="w-4 h-4" />
                 </span>
-                Cargar Gasto Variable
+                {t.addDailyModalTitle}
               </span>
               <button
                 type="button"
                 onClick={handleCloseAddModal}
-                title="Cerrar"
+                title={t.closeModal}
                 className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -467,7 +481,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
               {/* Descripción */}
               <div className="sm:col-span-12">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Descripción
+                  {t.descriptionFieldLabel}
                 </label>
                 <input
                   type="text"
@@ -483,7 +497,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
               {/* Monto */}
               <div className="sm:col-span-4">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Importe ({currency})
+                  {t.amountFieldLabel.replace('{currency}', currency)}
                 </label>
                 <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-emerald-500 transition-colors">
                   <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
@@ -504,13 +518,13 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
               {/* Categoría */}
               <div className="sm:col-span-4">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Categoría
+                  {t.categoryFieldLabel}
                 </label>
                 <div className="flex items-center gap-1.5">
                   <div
                     className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-white dark:border-slate-700"
                     style={{ backgroundColor: currentCategoryInfo.color }}
-                    title={`Color: ${currentCategoryInfo.label}`}
+                    title={t.colorTagTitle.replace('{label}', currentCategoryInfo.label)}
                   />
                   <select
                     value={category}
@@ -532,7 +546,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
               {/* Fecha (solo calendario del mes en curso e idioma seleccionado en NITA, formato numérico) */}
               <div className="sm:col-span-4 relative">
                 <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
+                  {t.dateFieldLabel}
                 </label>
                 <MonthCalendarInput
                   value={date}
@@ -553,14 +567,14 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                 onClick={handleCloseAddModal}
                 className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
               >
-                Cancelar
+                {t.cancel}
               </button>
               <button
                 type="submit"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Cargar Gasto</span>
+                <span>{t.submitExpenseBtn}</span>
               </button>
             </div>
           </form>
@@ -580,7 +594,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
             onClick={handleCancelEditExpense}
             role="dialog"
             aria-modal="true"
-            aria-label="Modificar Gasto Variable"
+            aria-label={t.editDailyModalTitle}
           >
             <form
               onClick={(e) => e.stopPropagation()}
@@ -595,7 +609,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                   <span className="p-1.5 bg-emerald-50 dark:bg-emerald-950/60 rounded-xl text-emerald-600 dark:text-emerald-400">
                     <Pencil className="w-4 h-4" />
                   </span>
-                  Modificar Gasto Variable
+                  {t.editDailyModalTitle}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <button
@@ -608,12 +622,12 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                     className="text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Eliminar</span>
+                    <span>{t.deleteBtnLabel}</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleCancelEditExpense}
-                    title="Cerrar"
+                    title={t.closeModal}
                     className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
@@ -625,7 +639,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                 {/* Descripción */}
                 <div className="sm:col-span-12">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Descripción
+                    {t.descriptionFieldLabel}
                   </label>
                   <input
                     type="text"
@@ -641,7 +655,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                 {/* Monto */}
                 <div className="sm:col-span-4">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Importe ({currency})
+                    {t.amountFieldLabel.replace('{currency}', currency)}
                   </label>
                   <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:border-emerald-500 transition-colors">
                     <span className="pl-3.5 pr-1 text-sm font-bold text-slate-400 dark:text-slate-500 select-none shrink-0">
@@ -662,13 +676,18 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                 {/* Categoría */}
                 <div className="sm:col-span-4">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    Categoría
+                    {t.categoryFieldLabel}
                   </label>
                   <select
                     value={editCategory}
                     onChange={(e) => setEditCategory(e.target.value)}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer truncate"
                   >
+                    {editCategory && !sortedCategories.some(c => c.id === editCategory) && (
+                      <option value={editCategory} className="dark:bg-slate-800 dark:text-white">
+                        {getCategoryInfo(editCategory, categories, language).label}
+                      </option>
+                    )}
                     {sortedCategories.map((c) => (
                       <option key={c.id} value={c.id} className="dark:bg-slate-800 dark:text-white">
                         {getCategoryInfo(c.id, categories, language).label}
@@ -680,7 +699,7 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                 {/* Fecha (solo calendario del mes en curso e idioma seleccionado en NITA, formato numérico) */}
                 <div className="sm:col-span-4 relative">
                   <label className="block text-3xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                    {language === 'en' ? 'Date' : language === 'de' ? 'Datum' : language === 'ca' || language === 'pt' || language === 'it' ? 'Data' : 'Fecha'}
+                    {t.dateFieldLabel}
                   </label>
                   <MonthCalendarInput
                     value={editDate}
@@ -701,14 +720,14 @@ export const DailyExpensesSection: React.FC<DailyExpensesSectionProps> = ({
                   onClick={handleCancelEditExpense}
                   className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
                 >
-                  Cancelar
+                  {t.cancel}
                 </button>
                 <button
                   type="submit"
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  <span>Guardar Cambios</span>
+                  <span>{t.saveChangesBtn}</span>
                 </button>
               </div>
             </form>

@@ -12,10 +12,21 @@ export const DEFAULT_ALERT_SETTINGS: DueDateAlertSettings = {
 
 const ALERT_SETTINGS_KEY = 'nita_alert_settings_v2';
 
-export function loadAlertSettings(): DueDateAlertSettings {
+function resolvePreferenceScopedKey(baseKey: string, userId?: string | null, isGuest?: boolean): string {
+  if (userId && typeof userId === 'string' && userId.trim().length > 0) {
+    return `${baseKey}_user_${userId.trim()}`;
+  }
+  if (isGuest) {
+    return `${baseKey}_guest`;
+  }
+  return baseKey;
+}
+
+export function loadAlertSettings(userId?: string | null, isGuest?: boolean): DueDateAlertSettings {
   if (typeof window === 'undefined') return DEFAULT_ALERT_SETTINGS;
   try {
-    const raw = localStorage.getItem(ALERT_SETTINGS_KEY);
+    const scopedKey = resolvePreferenceScopedKey(ALERT_SETTINGS_KEY, userId, isGuest);
+    const raw = localStorage.getItem(scopedKey);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (typeof parsed.enabled === 'boolean' && typeof parsed.daysInAdvance === 'number') {
@@ -25,17 +36,19 @@ export function loadAlertSettings(): DueDateAlertSettings {
         };
       }
     }
-    // Check legacy v1 if exists
-    const legacy = localStorage.getItem('nita_alert_settings_v1');
-    if (legacy) {
-      const parsedLegacy = JSON.parse(legacy);
-      const days = Array.isArray(parsedLegacy.selectedDays) && parsedLegacy.selectedDays.length > 0
-        ? Math.max(...parsedLegacy.selectedDays.filter((d: number) => d > 0), 3)
-        : 3;
-      return {
-        enabled: parsedLegacy.enabled ?? true,
-        daysInAdvance: Math.min(30, Math.max(1, days)),
-      };
+    // Check legacy v1 only for unscoped callers
+    if (!userId && !isGuest) {
+      const legacy = localStorage.getItem('nita_alert_settings_v1');
+      if (legacy) {
+        const parsedLegacy = JSON.parse(legacy);
+        const days = Array.isArray(parsedLegacy.selectedDays) && parsedLegacy.selectedDays.length > 0
+          ? Math.max(...parsedLegacy.selectedDays.filter((d: number) => d > 0), 3)
+          : 3;
+        return {
+          enabled: parsedLegacy.enabled ?? true,
+          daysInAdvance: Math.min(30, Math.max(1, days)),
+        };
+      }
     }
   } catch (e) {
     console.error('Error loading alert settings', e);
@@ -43,14 +56,15 @@ export function loadAlertSettings(): DueDateAlertSettings {
   return DEFAULT_ALERT_SETTINGS;
 }
 
-export function saveAlertSettings(settings: DueDateAlertSettings): void {
+export function saveAlertSettings(settings: DueDateAlertSettings, userId?: string | null, isGuest?: boolean): void {
   if (typeof window === 'undefined') return;
   try {
     const sanitized: DueDateAlertSettings = {
       enabled: Boolean(settings.enabled),
       daysInAdvance: Math.min(30, Math.max(1, Math.round(settings.daysInAdvance || 1))),
     };
-    localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(sanitized));
+    const scopedKey = resolvePreferenceScopedKey(ALERT_SETTINGS_KEY, userId, isGuest);
+    localStorage.setItem(scopedKey, JSON.stringify(sanitized));
   } catch (e) {
     console.error('Error saving alert settings', e);
   }
@@ -192,6 +206,42 @@ export function getExpenseNotifications(
     const targetMonthName = monthNames[expMonth] || '';
     const mKey = `${expYear}-${String(expMonth + 1).padStart(2, '0')}`;
 
+    const formatDueToday = (lang: string): string => {
+      switch (lang) {
+        case 'ca': return 'Venç avui!';
+        case 'pt': return 'Vence hoje!';
+        case 'fr': return 'Échéance aujourd\'hui !';
+        case 'it': return 'Scade oggi!';
+        case 'de': return 'Heute fällig!';
+        case 'en': return 'Due today!';
+        default: return '¡Vence hoy!';
+      }
+    };
+
+    const formatUpcoming = (days: number, lang: string): string => {
+      switch (lang) {
+        case 'ca': return days === 1 ? 'Venç demà' : `Venç en ${days} dies`;
+        case 'pt': return days === 1 ? 'Vence amanhã' : `Vence em ${days} dias`;
+        case 'fr': return days === 1 ? 'Échéance demain' : `Échéance dans ${days} jours`;
+        case 'it': return days === 1 ? 'Scade domani' : `Scade tra ${days} giorni`;
+        case 'de': return days === 1 ? 'Morgen fällig' : `Fällig in ${days} Tagen`;
+        case 'en': return days === 1 ? 'Due tomorrow' : `Due in ${days} days`;
+        default: return days === 1 ? 'Vence mañana' : `Vence en ${days} días`;
+      }
+    };
+
+    const formatOverdue = (daysAbs: number, lang: string): string => {
+      switch (lang) {
+        case 'ca': return `Vençut fa ${daysAbs} dia/es`;
+        case 'pt': return `Vencido há ${daysAbs} dia(s)`;
+        case 'fr': return `En retard de ${daysAbs} jour(s)`;
+        case 'it': return `Scaduto da ${daysAbs} giorno/i`;
+        case 'de': return `Überfällig seit ${daysAbs} Tag(en)`;
+        case 'en': return `Overdue by ${daysAbs} day(s)`;
+        default: return `Vencido hace ${daysAbs} día(s)`;
+      }
+    };
+
     if (diff === 0) {
       notifications.push({
         expenseId: expense.id,
@@ -201,7 +251,7 @@ export function getExpenseNotifications(
         dueDate: expense.dueDate,
         type: 'today',
         daysLeft: 0,
-        message: language === 'es' ? '¡Vence hoy!' : 'Due today!',
+        message: formatDueToday(language),
         targetYear: expYear,
         targetMonth: expMonth,
         monthKey: mKey,
@@ -217,9 +267,7 @@ export function getExpenseNotifications(
         dueDate: expense.dueDate,
         type: diff === 3 ? 'in_3_days' : 'upcoming',
         daysLeft: diff,
-        message: language === 'es'
-          ? (diff === 1 ? 'Vence mañana' : `Vence en ${diff} días`)
-          : (diff === 1 ? 'Due tomorrow' : `Due in ${diff} days`),
+        message: formatUpcoming(diff, language),
         targetYear: expYear,
         targetMonth: expMonth,
         monthKey: mKey,
@@ -236,9 +284,7 @@ export function getExpenseNotifications(
         dueDate: expense.dueDate,
         type: 'overdue',
         daysLeft: diff,
-        message: language === 'es' 
-          ? `Vencido hace ${Math.abs(diff)} día(s)`
-          : `Overdue by ${Math.abs(diff)} day(s)`,
+        message: formatOverdue(Math.abs(diff), language),
         targetYear: expYear,
         targetMonth: expMonth,
         monthKey: mKey,
@@ -302,7 +348,10 @@ export function sendBrowserNotification(title: string, body: string): void {
  */
 export function checkAndNotifyBrowser(
   notifications: ExpenseNotification[],
-  settings: DueDateAlertSettings = DEFAULT_ALERT_SETTINGS
+  settings: DueDateAlertSettings = DEFAULT_ALERT_SETTINGS,
+  language: string = 'es',
+  userId?: string | null,
+  isGuest?: boolean
 ): void {
   if (!settings.enabled || !('Notification' in window) || Notification.permission !== 'granted') {
     return;
@@ -311,23 +360,40 @@ export function checkAndNotifyBrowser(
   const todayStr = new Date().toISOString().slice(0, 10);
   const maxDays = Math.min(30, Math.max(1, settings.daysInAdvance));
 
+  const formatBrowserNotif = (item: ExpenseNotification): { title: string; body: string } => {
+    const d = item.daysLeft;
+    if (d === 0) {
+      switch (language) {
+        case 'en': return { title: `🚨 Due today: ${item.name}`, body: `"${item.name}" is due today (Day ${item.dueDate}). Open NITA to manage it.` };
+        case 'ca': return { title: `🚨 Venç avui: ${item.name}`, body: `La despesa "${item.name}" venç avui (Dia ${item.dueDate}). Entra a NITA per gestionar-la.` };
+        case 'pt': return { title: `🚨 Vence hoje: ${item.name}`, body: `A despesa "${item.name}" vence hoje (Dia ${item.dueDate}). Acesse o NITA para gerenciá-la.` };
+        case 'fr': return { title: `🚨 Échéance aujourd'hui : ${item.name}`, body: `La dépense « ${item.name} » arrive à échéance aujourd'hui (Jour ${item.dueDate}).` };
+        case 'it': return { title: `🚨 Scade oggi: ${item.name}`, body: `La spesa "${item.name}" scade oggi (Giorno ${item.dueDate}). Apri NITA per gestirla.` };
+        case 'de': return { title: `🚨 Heute fällig: ${item.name}`, body: `Die Ausgabe „${item.name}“ ist heute fällig (Tag ${item.dueDate}).` };
+        default: return { title: `🚨 Vence hoy: ${item.name}`, body: `El gasto "${item.name}" vence hoy (Día ${item.dueDate}). Ingresa a NITA para gestionarlo.` };
+      }
+    }
+    switch (language) {
+      case 'en': return { title: `⏰ Reminder (${d === 1 ? '1 day' : `${d} days`}): ${item.name}`, body: `"${item.name}" is due in ${d} day(s) (Day ${item.dueDate}).` };
+      case 'ca': return { title: `⏰ Avís (${d === 1 ? '1 dia' : `${d} dies`}): ${item.name}`, body: `La despesa "${item.name}" vencerà d'aquí a ${d} dia/es (Dia ${item.dueDate}).` };
+      case 'pt': return { title: `⏰ Aviso (${d === 1 ? '1 dia' : `${d} dias`}): ${item.name}`, body: `A despesa "${item.name}" vencerá em ${d} dia(s) (Dia ${item.dueDate}).` };
+      case 'fr': return { title: `⏰ Rappel (${d === 1 ? '1 jour' : `${d} jours`}) : ${item.name}`, body: `La dépense « ${item.name} » arrivera à échéance dans ${d} jour(s) (Jour ${item.dueDate}).` };
+      case 'it': return { title: `⏰ Avviso (${d === 1 ? '1 giorno' : `${d} giorni`}): ${item.name}`, body: `La spesa "${item.name}" scadrà tra ${d} giorno/i (Giorno ${item.dueDate}).` };
+      case 'de': return { title: `⏰ Erinnerung (${d === 1 ? '1 Tag' : `${d} Tage`}): ${item.name}`, body: `Die Ausgabe „${item.name}“ ist in ${d} Tag(en) fällig (Tag ${item.dueDate}).` };
+      default: return { title: `⏰ Aviso (${d === 1 ? '1 día' : `${d} días`}): ${item.name}`, body: `El gasto "${item.name}" vencerá en ${d} día(s) (Día ${item.dueDate}).` };
+    }
+  };
+
   notifications.forEach((item) => {
     // Only send browser alerts for pending items within configured days
     if (item.daysLeft < 0 || item.daysLeft > maxDays) return;
 
-    const storageKey = `nita_notif_${item.expenseId}_${item.daysLeft}_${todayStr}`;
+    const storageKey = resolvePreferenceScopedKey(`nita_notif_${item.expenseId}_${item.daysLeft}_${todayStr}`, userId, isGuest);
     if (localStorage.getItem(storageKey)) {
       return; // Already notified today
     }
 
-    const title = item.daysLeft === 0
-      ? `🚨 Vence hoy: ${item.name}`
-      : `⏰ Aviso (${item.daysLeft === 1 ? '1 día' : `${item.daysLeft} días`}): ${item.name}`;
-
-    const body = item.daysLeft === 0
-      ? `El gasto "${item.name}" vence hoy (Día ${item.dueDate}). Ingresa a NITA para gestionarlo.`
-      : `El gasto "${item.name}" vencerá en ${item.daysLeft} día(s) (Día ${item.dueDate}).`;
-
+    const { title, body } = formatBrowserNotif(item);
     sendBrowserNotification(title, body);
     localStorage.setItem(storageKey, 'true');
   });
@@ -343,10 +409,11 @@ export interface DismissedPreventiveRecord {
   dismissedAt: string;
 }
 
-export function loadDismissedPreventiveAlerts(): Record<string, DismissedPreventiveRecord> {
+export function loadDismissedPreventiveAlerts(userId?: string | null, isGuest?: boolean): Record<string, DismissedPreventiveRecord> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(DISMISSED_PREVENTIVE_KEY);
+    const scopedKey = resolvePreferenceScopedKey(DISMISSED_PREVENTIVE_KEY, userId, isGuest);
+    const raw = localStorage.getItem(scopedKey);
     if (!raw) return {};
     return JSON.parse(raw) || {};
   } catch (e) {
@@ -362,11 +429,13 @@ export function isPreventiveAlertDismissed(
   expenseId: string,
   dueDate: number,
   year: number,
-  month: number
+  month: number,
+  userId?: string | null,
+  isGuest?: boolean
 ): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    const alerts = loadDismissedPreventiveAlerts();
+    const alerts = loadDismissedPreventiveAlerts(userId, isGuest);
     const key = `${year}_${month}_${expenseId}_due_${dueDate}`;
     return Boolean(alerts[key]);
   } catch {
@@ -381,11 +450,14 @@ export function dismissPreventiveAlert(
   expenseId: string,
   dueDate: number,
   year: number,
-  month: number
+  month: number,
+  userId?: string | null,
+  isGuest?: boolean
 ): void {
   if (typeof window === 'undefined') return;
   try {
-    const alerts = loadDismissedPreventiveAlerts();
+    const scopedKey = resolvePreferenceScopedKey(DISMISSED_PREVENTIVE_KEY, userId, isGuest);
+    const alerts = loadDismissedPreventiveAlerts(userId, isGuest);
     const key = `${year}_${month}_${expenseId}_due_${dueDate}`;
     alerts[key] = {
       expenseId,
@@ -404,7 +476,7 @@ export function dismissPreventiveAlert(
       }
     }
 
-    localStorage.setItem(DISMISSED_PREVENTIVE_KEY, JSON.stringify(cleaned));
+    localStorage.setItem(scopedKey, JSON.stringify(cleaned));
   } catch (e) {
     console.error('Error saving dismissed preventive alert', e);
   }
@@ -416,11 +488,14 @@ export function dismissPreventiveAlert(
 export function clearDismissedPreventiveAlert(
   expenseId: string,
   year: number,
-  month: number
+  month: number,
+  userId?: string | null,
+  isGuest?: boolean
 ): void {
   if (typeof window === 'undefined') return;
   try {
-    const alerts = loadDismissedPreventiveAlerts();
+    const scopedKey = resolvePreferenceScopedKey(DISMISSED_PREVENTIVE_KEY, userId, isGuest);
+    const alerts = loadDismissedPreventiveAlerts(userId, isGuest);
     let changed = false;
     for (const k of Object.keys(alerts)) {
       if (k.startsWith(`${year}_${month}_${expenseId}`)) {
@@ -429,7 +504,7 @@ export function clearDismissedPreventiveAlert(
       }
     }
     if (changed) {
-      localStorage.setItem(DISMISSED_PREVENTIVE_KEY, JSON.stringify(alerts));
+      localStorage.setItem(scopedKey, JSON.stringify(alerts));
     }
   } catch (e) {
     console.error('Error clearing dismissed preventive alert', e);

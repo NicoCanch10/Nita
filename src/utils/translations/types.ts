@@ -222,4 +222,149 @@ export interface Translations {
   confirmCopy: string;
   noPreviousMonthData: string;
   understood: string;
+
+  // Auth & Loading
+  authTagline: string;
+  authSecureLoginLoading: string;
+  authSyncingFinances: string;
+  authOfflineTitle: string;
+  authOfflineDesc: string;
+  authConnectingGoogle: string;
+  authContinueGoogle: string;
+  authOrWithCredentials: string;
+  authSignInTab: string;
+  authRegisterTab: string;
+  authUsernameLabel: string;
+  authUsernamePlaceholder: string;
+  authUsernameHint: string;
+  authPasswordLabel: string;
+  authPasswordHint: string;
+  authConfirmPasswordLabel: string;
+  authSigningInBtn: string;
+  authCreatingAccountBtn: string;
+  authOrAlso: string;
+  authContinueGuest: string;
+  authWhySignInTitle: string;
+  authWhySignInDesc: string;
+  authErrGoogle: string;
+  authErrMissingUsername: string;
+  authErrMissingPassword: string;
+  authErrInvalidUsername: string;
+  authErrInvalidPassword: string;
+  authErrPasswordsMismatch: string;
+  authErrSignIn: string;
+  authErrCreateAccount: string;
+
+  // Header Greeting & Guest Banner
+  headerGreeting: string;
+  guestBannerTitle: string;
+  guestBannerDesc: string;
+  guestBannerAction: string;
+
+  // App Toast & Summary Bar
+  appAutoUpdatedToast: string;
+  summaryBarEditIncomeTitle: string;
+  mobileNavAria: string;
+
+  // Settings Account, Sync, Password, Updates & Version
+  settingsButtonTitle: string;
+  settingsButtonAria: string;
+  toggleAlertsOnTitle: string;
+  toggleAlertsOffTitle: string;
+  updatingNita: string;
+  forceCleanReloadBtn: string;
+  accountSyncTitle: string;
+  statusOnlineBadge: string;
+  statusOfflineBadge: string;
+  statusLocalModeBadge: string;
+  accountUserLabel: string;
+  accountUserFallback: string;
+  accountEmailLabel: string;
+  accountNoEmail: string;
+  accountStatusLabel: string;
+  accountSyncActive: string;
+  accountSavedLocal: string;
+  accountSyncingCloud: string;
+  accountSyncNowBtn: string;
+  accountChangePasswordBtn: string;
+  accountHidePasswordBtn: string;
+  accountPasswordOfflineWarn: string;
+  accountCurrentPassword: string;
+  accountNewPasswordLabel: string;
+  accountConfirmNewPassword: string;
+  accountUpdatingPasswordBtn: string;
+  accountSaveNewPasswordBtn: string;
+  accountPasswordMissingCurrent: string;
+  accountPasswordInvalidNew: string;
+  accountPasswordMismatch: string;
+  accountPasswordUpdated: string;
+  accountPasswordFailed: string;
+  accountSignOutBtn: string;
+  accountGuestHeading: string;
+  accountGuestDesc: string;
+  accountSignInCreateBtn: string;
+  versionLabel: string;
+
+  // Legacy Account Popover strings
+  accountTitle: string;
+  accountSyncRealtime: string;
+  accountActiveBadge: string;
+  accountLinkedLabel: string;
+  accountLinkedActive: string;
+  accountOfflineTitle: string;
+  accountOfflineSavedSession: string;
+  accountUploadNowBtn: string;
+  accountPendingLocalSingle: string;
+  accountPendingLocalPlural: string;
+  accountRetryingSync: string;
+  accountPendingSyncSingle: string;
+  accountPendingSyncPlural: string;
+  accountSavedBadge: string;
+  accountSyncedShort: string;
+  accountOfflineShort: string;
+
+  // Expense Modals & Tooltips
+  addExpenseTriggerBtn: string;
+  addFixedModalTitle: string;
+  editFixedModalTitle: string;
+  addDailyModalTitle: string;
+  editDailyModalTitle: string;
+  conceptFieldLabel: string;
+  descriptionFieldLabel: string;
+  amountFieldLabel: string;
+  categoryFieldLabel: string;
+  dateFieldLabel: string;
+  submitExpenseBtn: string;
+  saveChangesBtn: string;
+  deleteBtnLabel: string;
+  editFixedTooltip: string;
+  editDailyTooltip: string;
+  colorTagTitle: string;
+  optionalSuffix: string;
+
+  // Five Jars Overbudget, Tooltips & Calendar Formulas
+  daysRangeTemplate: string;
+  noExtraDaysFormula: string;
+  extraDaysStartTooltip: string;
+  extraDaysEndTooltip: string;
+  jarPromptJarLabel: string;
+  jarPromptAssignedLabel: string;
+  jarPromptSpentLabel: string;
+  jarPromptExcessLabel: string;
+  jarAdjustExplainHeading: string;
+  jarAdjustExplainSameMonth: string;
+  jarAdjustExplainNextMonth: string;
+  jarAdjustSuccessSameMonth: string;
+  jarAdjustSuccessNextMonth: string;
+  jarOtherExceededLabel: string;
+  jarUndoBtn: string;
+  jarCardExcessLabel: string;
+  jarAdjustNextBtn: string;
+  jarActiveRedistributionsNotice: string;
+  jarActiveRedistributionsNextMonth: string;
+
+  // Financial Health Extras
+  healthExpand: string;
+  healthCollapse: string;
+  perMonthUnit: string;
 }

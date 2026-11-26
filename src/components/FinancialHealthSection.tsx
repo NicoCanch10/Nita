@@ -1,4 +1,4 @@
-import React, { useState, useId } from 'react';
+import React, { useState, useId, useEffect } from 'react';
 import { CurrencyCode, FixedExpense, VariableExpense, CategoryInfo } from '../types/budget';
 import { formatCurrency } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
@@ -262,12 +262,63 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   const showContent = !collapsible || isExpanded;
 
   // Simulator states
-  const [simSavingReduction, setSimSavingReduction] = useState<number>(30000);
+  const [simSavingReduction, setSimSavingReduction] = useState<number>(0);
   const [simIncomeBoost, setSimIncomeBoost] = useState<number>(0);
   const [hoveredComposition, setHoveredComposition] = useState<string | null>(null);
 
-  const totalFixed = fixedExpenses.reduce((sum, e) => sum + e.amount, 0);
-  
+  const totalFixed = (fixedExpenses || []).reduce((sum, e) => sum + (Number(e?.amount) || 0), 0);
+
+  const getDefaultIncomeBoostMax = (curr: CurrencyCode): number => {
+    switch (curr) {
+      case 'ARS':
+      case 'CLP':
+      case 'COP':
+      case 'PYG':
+        return 500000;
+      case 'CRC':
+      case 'UYU':
+      case 'MXN':
+      case 'DOP':
+        return 20000;
+      case 'BRL':
+      case 'PEN':
+      case 'BOB':
+      case 'GTQ':
+      case 'HNL':
+      case 'NIO':
+      case 'HTG':
+      case 'VES':
+        return 5000;
+      default:
+        return 2000;
+    }
+  };
+
+  const getNiceSliderStep = (maxVal: number): number => {
+    if (maxVal <= 0) return 1;
+    const raw = maxVal / 50;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+    const normalized = raw / magnitude;
+    const snapped = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+    return Math.max(1, snapped * magnitude);
+  };
+
+  const fixedSliderMax = Math.max(0, Math.round(totalFixed));
+  const fixedSliderStep = getNiceSliderStep(fixedSliderMax);
+  const currencyDefaultBoostMax = getDefaultIncomeBoostMax(currency);
+  const incomeBoostMax = income > 0
+    ? Math.max(currencyDefaultBoostMax, Math.ceil(income / getNiceSliderStep(income)) * getNiceSliderStep(income))
+    : currencyDefaultBoostMax;
+  const incomeBoostStep = getNiceSliderStep(incomeBoostMax);
+
+  useEffect(() => {
+    setSimSavingReduction(0);
+    setSimIncomeBoost(0);
+  }, [currency]);
+
+  const effectiveSimSavingReduction = Math.min(simSavingReduction, fixedSliderMax);
+  const effectiveSimIncomeBoost = Math.min(simIncomeBoost, incomeBoostMax);
+
   // Distribución del porcentaje:
   // 1º Tomar Ingreso Neto Mensual
   // 2º Descontar el % indicado en Ahorro
@@ -275,22 +326,23 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
   const savingsPct = Math.round(savingsRate * 100) / 100;
 
   // 3º Distribuir entre Gastos Fijos y Gastos Variables
-  const fixedPct = income > 0 ? Math.round((totalFixed / income) * 100) : 0;
-  const variablePct = income > 0 ? Math.round(Math.max(0, 100 - savingsPct - fixedPct) * 100) / 100 : 0;
+  const fixedPct = income > 0 ? Math.round((totalFixed / income) * 1000) / 10 : 0;
+  const variableAmountRaw = Math.max(0, income - totalFixed - totalSavings);
+  const variablePct = income > 0 ? Math.round((variableAmountRaw / income) * 1000) / 10 : 0;
 
   // Simulation calculations
-  const simNewIncome = income + simIncomeBoost;
-  const simNewFixed = Math.max(0, totalFixed - simSavingReduction);
+  const simNewIncome = income + effectiveSimIncomeBoost;
+  const simNewFixed = Math.max(0, totalFixed - effectiveSimSavingReduction);
   const simNewSavings = simNewIncome > 0 ? (simNewIncome * savingsRate) / 100 : 0;
   const simNewRemaining = Math.max(0, simNewIncome - simNewFixed - simNewSavings);
-  
+
   // Percentages with priority impact: 1º Ahorro, 2º Gastos Fijos, 3º Gastos Variables
   const simSavingsPct = simNewIncome > 0 ? ((simNewSavings / simNewIncome) * 100).toFixed(1) : '0';
   const simFixedPct = simNewIncome > 0 ? ((simNewFixed / simNewIncome) * 100).toFixed(1) : '0';
   const simRemainingPct = simNewIncome > 0 ? ((simNewRemaining / simNewIncome) * 100).toFixed(1) : '0';
 
   const simNewDailyBase = daysInMonth > 0 ? simNewRemaining / daysInMonth : 0;
-  const currentDailyBase = daysInMonth > 0 ? (income - totalFixed - totalSavings) / daysInMonth : 0;
+  const currentDailyBase = daysInMonth > 0 ? Math.max(0, income - totalFixed - totalSavings) / daysInMonth : 0;
   const dailyGain = simNewDailyBase - currentDailyBase;
 
   const headerTitleContent = (
@@ -326,7 +378,7 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
 
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hidden sm:inline">
-              {isExpanded ? 'Contraer' : 'Desplegar'}
+              {isExpanded ? t.healthCollapse : t.healthExpand}
             </span>
             <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
               {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -734,22 +786,23 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                       {t.simulateFixedCut}
                     </label>
                     <span className="font-bold text-blue-700 dark:text-blue-400 tabular-nums">
-                      {formatCurrency(simSavingReduction, currency)}/mes
+                      {formatCurrency(effectiveSimSavingReduction, currency)}/{t.perMonthUnit}
                     </span>
                   </div>
                   <input
                     type="range"
                     min="0"
-                    max={Math.min(totalFixed, 200000)}
-                    step="5000"
-                    value={simSavingReduction}
+                    max={fixedSliderMax}
+                    step={fixedSliderStep}
+                    disabled={fixedSliderMax <= 0}
+                    value={effectiveSimSavingReduction}
                     onChange={(e) => setSimSavingReduction(Number(e.target.value))}
-                    className="w-full accent-blue-600 cursor-pointer h-2 bg-slate-100 dark:bg-slate-800 rounded-lg"
+                    className="w-full accent-blue-600 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed h-2 bg-slate-100 dark:bg-slate-800 rounded-lg"
                   />
                   <div className="flex items-center justify-between text-2xs text-slate-400 dark:text-slate-500">
-                    <span>$0</span>
+                    <span>{formatCurrency(0, currency)}</span>
                     <span>{t.moderateCut}</span>
-                    <span>{formatCurrency(Math.min(totalFixed, 200000), currency)}</span>
+                    <span>{formatCurrency(fixedSliderMax, currency)}</span>
                   </div>
                 </div>
 
@@ -760,22 +813,22 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                       {t.simulateIncomeBoost}
                     </label>
                     <span className="font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
-                      +{formatCurrency(simIncomeBoost, currency)}/{t.perDay}
+                      +{formatCurrency(effectiveSimIncomeBoost, currency)}/{t.perMonthUnit}
                     </span>
                   </div>
                   <input
                     type="range"
                     min="0"
-                    max="500000"
-                    step="10000"
-                    value={simIncomeBoost}
+                    max={incomeBoostMax}
+                    step={incomeBoostStep}
+                    value={effectiveSimIncomeBoost}
                     onChange={(e) => setSimIncomeBoost(Number(e.target.value))}
                     className="w-full accent-emerald-600 cursor-pointer h-2 bg-slate-100 dark:bg-slate-800 rounded-lg"
                   />
                   <div className="flex items-center justify-between text-2xs text-slate-400 dark:text-slate-500">
-                    <span>$0</span>
-                    <span>+250.000</span>
-                    <span>+500.000</span>
+                    <span>{formatCurrency(0, currency)}</span>
+                    <span>+{formatCurrency(Math.round(incomeBoostMax / 2), currency)}</span>
+                    <span>+{formatCurrency(incomeBoostMax, currency)}</span>
                   </div>
                 </div>
 
@@ -786,7 +839,7 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                       <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                       <span className="text-center">{t.simResultTitle}</span>
                     </div>
-                    {simIncomeBoost > 0 && (
+                    {effectiveSimIncomeBoost > 0 && (
                       <span className="inline-flex items-center text-3xs font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap shadow-2xs">
                         {t.simProjectedIncome}
                       </span>
@@ -841,23 +894,32 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                     </div>
 
                     {/* Barra visual de composición proyectada: 1º Fijo, 2º Variable, 3º Ahorro */}
-                    <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800 flex overflow-hidden shadow-2xs mt-2">
-                      <div 
-                        style={{ width: `${Math.min(100, Number(simFixedPct))}%` }} 
-                        className="bg-blue-600 h-full"
-                        title={`${t.tabFixed}: ${simFixedPct}%`}
-                      />
-                      <div 
-                        style={{ width: `${Math.max(0, 100 - Number(simSavingsPct) - Number(simFixedPct))}%` }} 
-                        className="bg-indigo-500 h-full"
-                        title={`${t.variableExpenses}: ${simRemainingPct}%`}
-                      />
-                      <div 
-                        style={{ width: `${Math.min(100, Number(simSavingsPct))}%` }} 
-                        className="bg-emerald-500 h-full"
-                        title={`${t.savingsBarTitle}: ${simSavingsPct}%`}
-                      />
-                    </div>
+                    {(() => {
+                      const rawTotalPct = Number(simFixedPct) + Number(simRemainingPct) + Number(simSavingsPct);
+                      const scale = rawTotalPct > 100 ? 100 / rawTotalPct : 1;
+                      const barFixedW = Math.max(0, Number(simFixedPct) * scale);
+                      const barRemainingW = Math.max(0, Number(simRemainingPct) * scale);
+                      const barSavingsW = Math.max(0, Number(simSavingsPct) * scale);
+                      return (
+                        <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800 flex overflow-hidden shadow-2xs mt-2">
+                          <div 
+                            style={{ width: `${barFixedW}%` }} 
+                            className="bg-blue-600 h-full"
+                            title={`${t.tabFixed}: ${simFixedPct}%`}
+                          />
+                          <div 
+                            style={{ width: `${barRemainingW}%` }} 
+                            className="bg-indigo-500 h-full"
+                            title={`${t.variableExpenses}: ${simRemainingPct}%`}
+                          />
+                          <div 
+                            style={{ width: `${barSavingsW}%` }} 
+                            className="bg-emerald-500 h-full"
+                            title={`${t.savingsBarTitle}: ${simSavingsPct}%`}
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="pt-2 border-t border-indigo-100/60 dark:border-indigo-900/60 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs text-center">
@@ -866,7 +928,10 @@ export const FinancialHealthSection: React.FC<FinancialHealthSectionProps> = ({
                         {t.newDailyBudget}
                       </span>
                       <span className="text-xs sm:text-sm md:text-base font-extrabold text-slate-900 dark:text-white tabular-nums tracking-tight text-center max-w-full break-words leading-tight">
-                        {formatCurrency(simNewRemaining, currency)}
+                        {formatCurrency(simNewDailyBase, currency)}/{t.perDay}
+                      </span>
+                      <span className="text-3xs sm:text-2xs text-slate-500 dark:text-slate-400 font-semibold tabular-nums mt-0.5">
+                        ({formatCurrency(simNewRemaining, currency)}/{t.perMonthUnit})
                       </span>
                     </div>
 

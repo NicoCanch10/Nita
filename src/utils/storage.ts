@@ -11,6 +11,7 @@ import {
   DEFAULT_CATEGORIES,
   normalizeDefaultCategories,
   normalizeDefaultCategoryLabel,
+  getCategoryInfo,
 } from './currency';
 
 // Legacy keys to be kept untouched and protected from automatic migration
@@ -1380,6 +1381,65 @@ export function explicitlyMigrateLegacyDataToUser(
   return result.applied;
 }
 
+export function escapeCsvCell(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  const raw = String(value ?? '').replace(/\r?\n/g, ' ');
+  const neutralized = /^[=+\-@\t]/.test(raw) ? `'${raw}` : raw;
+  return `"${neutralized.replace(/"/g, '""')}"`;
+}
+
+export function buildCSVContent(
+  year: number,
+  month: number,
+  currency: CurrencyCode,
+  monthData: MonthData,
+  language: string = 'es'
+): string {
+  const lines: string[] = [];
+  const cats = monthData.categories || [];
+  const savingsRate = Number(monthData.savingsRate) || 0;
+
+  // Header & Month summary
+  lines.push(escapeCsvCell('NITA - TUS FINANZAS, MAS SIMPLES - Reporte de Presupuesto'));
+  lines.push(`${escapeCsvCell('Mes / Año')},${escapeCsvCell(`${month + 1}/${year}`)}`);
+  lines.push(`${escapeCsvCell('Moneda')},${escapeCsvCell(currency)}`);
+  lines.push(`${escapeCsvCell('Ingreso Neto Mensual')},${escapeCsvCell(Number(monthData.income) || 0)}`);
+  lines.push(`${escapeCsvCell('Ahorro (%)')},${escapeCsvCell(`${savingsRate}%`)}`);
+  lines.push(``);
+
+  // Gastos Fijos
+  lines.push(escapeCsvCell('GASTOS FIJOS Y OBLIGACIONES'));
+  lines.push(['Concepto', 'Monto', 'Categoría', 'Día Vencimiento', 'Estado'].map(escapeCsvCell).join(','));
+  (monthData.fixedExpenses || []).forEach(exp => {
+    const catLabel = getCategoryInfo(exp.category, cats, language).label;
+    lines.push([
+      escapeCsvCell(exp.name),
+      escapeCsvCell(Number(exp.amount) || 0),
+      escapeCsvCell(catLabel),
+      escapeCsvCell(exp.dueDate ?? ''),
+      escapeCsvCell(exp.isPaid ? 'PAGADO' : 'PENDIENTE'),
+    ].join(','));
+  });
+  lines.push(``);
+
+  // Gastos Variables
+  lines.push(escapeCsvCell('CONTROL DE GASTOS DIARIOS Y VARIABLES'));
+  lines.push(['Fecha', 'Descripción', 'Monto', 'Categoría'].map(escapeCsvCell).join(','));
+  (monthData.variableExpenses || []).forEach(exp => {
+    const catLabel = getCategoryInfo(exp.category, cats, language).label;
+    lines.push([
+      escapeCsvCell(exp.date),
+      escapeCsvCell(exp.description),
+      escapeCsvCell(Number(exp.amount) || 0),
+      escapeCsvCell(catLabel),
+    ].join(','));
+  });
+
+  return '\uFEFF' + lines.join('\n');
+}
+
 /**
  * Export month data to CSV format
  */
@@ -1387,33 +1447,10 @@ export function exportToCSV(
   year: number,
   month: number,
   currency: CurrencyCode,
-  monthData: MonthData
+  monthData: MonthData,
+  language: string = 'es'
 ): void {
-  const lines: string[] = [];
-
-  // Header & Month summary
-  lines.push(`"NITA - TUS FINANZAS, MAS SIMPLES - Reporte de Presupuesto"`);
-  lines.push(`"Mes / Año","${month + 1}/${year}"`);
-  lines.push(`"Moneda","${currency}"`);
-  lines.push(`"Ingreso Neto Mensual","${monthData.income}"`);
-  lines.push(``);
-
-  // Gastos Fijos
-  lines.push(`"GASTOS FIJOS Y OBLIGACIONES"`);
-  lines.push(`"Concepto","Monto","Categoría","Día Vencimiento","Estado"`);
-  monthData.fixedExpenses.forEach(exp => {
-    lines.push(`"${exp.name}","${exp.amount}","${exp.category}","${exp.dueDate ?? ''}","${exp.isPaid ? 'PAGADO' : 'PENDIENTE'}"`);
-  });
-  lines.push(``);
-
-  // Gastos Variables
-  lines.push(`"CONTROL DE GASTOS DIARIOS Y VARIABLES"`);
-  lines.push(`"Fecha","Descripción","Monto","Categoría"`);
-  monthData.variableExpenses.forEach(exp => {
-    lines.push(`"${exp.date}","${exp.description}","${exp.amount}","${exp.category}"`);
-  });
-
-  const csvContent = lines.join('\n');
+  const csvContent = buildCSVContent(year, month, currency, monthData, language);
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -1422,6 +1459,9 @@ export function exportToCSV(
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 /**

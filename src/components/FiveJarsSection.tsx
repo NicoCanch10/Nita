@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FiveJarsCalculation, CurrencyCode, ExtraDaysPosition, Frasco } from '../types/budget';
 import { formatCurrency } from '../utils/currency';
 import { getTranslations } from '../utils/languages';
@@ -80,6 +80,11 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
   const [dismissedJars, setDismissedJars] = useState<Record<number, boolean>>({});
   const [adjustmentSuccess, setAdjustmentSuccess] = useState<string | null>(null);
 
+  useEffect(() => {
+    setDismissedJars({});
+    setAdjustmentSuccess(null);
+  }, [year, month]);
+
   // Frasco activo para el cartel principal de aviso
   const activeExceededJar = exceededJars.find(j => !dismissedJars[j.number]) || null;
   const activeExceededIndex = activeExceededJar ? jars.findIndex(j => j.number === activeExceededJar.number) : -1;
@@ -123,11 +128,21 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
 
     if (last) {
       setAdjustmentSuccess(
-        `Se ajustó ${targetJar.title} a ${formatCurrency(0, currency)} disponible. El exceso de ${formatCurrency(diff, currency)} fue transferido equitativamente a los frascos de ${nextMonthName} ${nextYearVal} (-${formatCurrency(diff / nextActiveJarsCount, currency)} c/u).`
+        t.jarAdjustSuccessNextMonth
+          .replace('{jarTitle}', targetJar.title)
+          .replace('{zero}', formatCurrency(0, currency))
+          .replace('{excess}', formatCurrency(diff, currency))
+          .replace('{monthYear}', `${nextMonthName} ${nextYearVal}`)
+          .replace('{perJar}', formatCurrency(diff / nextActiveJarsCount, currency))
       );
     } else {
       setAdjustmentSuccess(
-        `Se ajustó ${targetJar.title} a ${formatCurrency(0, currency)} disponible. El exceso de ${formatCurrency(diff, currency)} fue redistribuido entre los ${subJars.length} frascos restantes de este mes (-${formatCurrency(diff / subJars.length, currency)} c/u).`
+        t.jarAdjustSuccessSameMonth
+          .replace('{jarTitle}', targetJar.title)
+          .replace('{zero}', formatCurrency(0, currency))
+          .replace('{excess}', formatCurrency(diff, currency))
+          .replace('{count}', String(subJars.length))
+          .replace('{perJar}', formatCurrency(diff / subJars.length, currency))
       );
     }
   };
@@ -164,7 +179,7 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
                     ? 'bg-white dark:bg-slate-900 text-indigo-900 dark:text-indigo-200 shadow-2xs font-extrabold'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
-                title={`Primeros días del mes (días 1 al ${extraDays})`}
+                title={t.extraDaysStartTooltip.replace('{extraDays}', String(extraDays))}
               >
                 <span className="hidden min-[400px]:inline">{t.extraDaysFirst}</span>
                 <span className="min-[400px]:hidden">{t.extraDaysFirst.replace(/ (días|days|jours|tage|dies|dias|giorni)/i, '')}</span>
@@ -177,7 +192,7 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
                     ? 'bg-white dark:bg-slate-900 text-indigo-900 dark:text-indigo-200 shadow-2xs font-extrabold'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
-                title={`Últimos días del mes (días 29 al ${daysInMonth})`}
+                title={t.extraDaysEndTooltip.replace('{daysInMonth}', String(daysInMonth))}
               >
                 <span className="hidden min-[400px]:inline">{t.extraDaysLast}</span>
                 <span className="min-[400px]:hidden">{t.extraDaysLast.replace(/ (días|days|jours|tage|dies|dias|giorni)/i, '')}</span>
@@ -205,9 +220,13 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
                   "{t.jarOverbudgetPromptTitle}"
                 </h3>
                 <p className="text-xs text-amber-900/80 dark:text-amber-300/90 font-medium">
-                  Frasco: <strong className="font-extrabold text-amber-950 dark:text-amber-100">{activeExceededJar.title}</strong> · Asignado:{' '}
-                  <strong className="font-bold">{formatCurrency(activeExceededJar.amount, currency)}</strong> · Gastado:{' '}
-                  <strong className="font-bold text-rose-700 dark:text-rose-400">{formatCurrency(activeExceededJar.spent, currency)}</strong> · Exceso:{' '}
+                  {t.jarPromptJarLabel}{' '}
+                  <strong className="font-extrabold text-amber-950 dark:text-amber-100">{activeExceededJar.title}</strong> ·{' '}
+                  {t.jarPromptAssignedLabel}{' '}
+                  <strong className="font-bold">{formatCurrency(activeExceededJar.amount, currency)}</strong> ·{' '}
+                  {t.jarPromptSpentLabel}{' '}
+                  <strong className="font-bold text-rose-700 dark:text-rose-400">{formatCurrency(activeExceededJar.spent, currency)}</strong> ·{' '}
+                  {t.jarPromptExcessLabel}{' '}
                   <strong className="font-black text-rose-700 dark:text-rose-400">{formatCurrency(excessDiff, currency)}</strong>
                 </p>
               </div>
@@ -226,23 +245,27 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
           <div className="p-3.5 bg-white/85 dark:bg-slate-900/85 border border-amber-200 dark:border-amber-800/80 rounded-2xl text-xs text-slate-700 dark:text-slate-200 space-y-1.5 shadow-2xs">
             <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-300">
               <Scale className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span>Cómo se calculará el ajuste:</span>
+              <span>{t.jarAdjustExplainHeading}</span>
             </div>
             {!isLastJar ? (
               <p className="leading-relaxed">
-                El monto asignado a <strong>{activeExceededJar.title}</strong> se actualizará para que su saldo disponible quede en{' '}
-                <strong className="text-emerald-700 dark:text-emerald-400 font-black">{formatCurrency(0, currency)}</strong>. La diferencia de{' '}
-                <strong className="text-rose-700 dark:text-rose-400 font-extrabold">{formatCurrency(excessDiff, currency)}</strong> se dividirá entre los{' '}
-                <strong>{subsequentJars.length} frascos restantes</strong> del mes ({subsequentJars.map(j => j.title).join(', ')}), restando{' '}
-                <strong className="text-amber-800 dark:text-amber-300 font-extrabold">{formatCurrency(deductionPerJar, currency)}</strong> del total disponible de cada uno para no desbalancear tu presupuesto mensual.
+                {t.jarAdjustExplainSameMonth
+                  .replace('{jarTitle}', activeExceededJar.title)
+                  .replace('{zero}', formatCurrency(0, currency))
+                  .replace('{excess}', formatCurrency(excessDiff, currency))
+                  .replace('{count}', String(subsequentJars.length))
+                  .replace('{list}', subsequentJars.map(j => j.title).join(', '))
+                  .replace('{perJar}', formatCurrency(deductionPerJar, currency))}
               </p>
             ) : (
               <p className="leading-relaxed">
-                Al tratarse del <strong>último frasco del mes</strong>, se actualizará <strong>{activeExceededJar.title}</strong> para que su disponible quede en{' '}
-                <strong className="text-emerald-700 dark:text-emerald-400 font-black">{formatCurrency(0, currency)}</strong>. La diferencia de{' '}
-                <strong className="text-rose-700 dark:text-rose-400 font-extrabold">{formatCurrency(excessDiff, currency)}</strong> se dividirá equitativamente entre los{' '}
-                <strong>{nextActiveJarsCount} frascos del siguiente mes ({nextMonthName} {nextYearVal})</strong>, restando{' '}
-                <strong className="text-amber-800 dark:text-amber-300 font-extrabold">{formatCurrency(deductionPerJar, currency)}</strong> a cada frasco de dicho mes.
+                {t.jarAdjustExplainNextMonth
+                  .replace('{jarTitle}', activeExceededJar.title)
+                  .replace('{zero}', formatCurrency(0, currency))
+                  .replace('{excess}', formatCurrency(excessDiff, currency))
+                  .replace('{count}', String(nextActiveJarsCount))
+                  .replace('{monthYear}', `${nextMonthName} ${nextYearVal}`)
+                  .replace('{perJar}', formatCurrency(deductionPerJar, currency))}
               </p>
             )}
           </div>
@@ -270,7 +293,7 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
             {exceededJars.length > 1 && (
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-3xs font-extrabold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                  Otros con exceso:
+                  {t.jarOtherExceededLabel}
                 </span>
                 {exceededJars.map(j => (
                   <button
@@ -309,7 +332,7 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
               className="flex items-center gap-1 px-2.5 py-1 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 rounded-lg font-bold transition-colors cursor-pointer shrink-0"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Deshacer</span>
+              <span>{t.jarUndoBtn}</span>
             </button>
           )}
         </div>
@@ -440,7 +463,7 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
                     <div className="flex items-center justify-between text-2xs font-extrabold text-rose-700 dark:text-rose-300">
                       <span className="flex items-center gap-1">
                         <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 shrink-0" />
-                        <span>Exceso: {formatCurrency(jar.spent - jar.amount, currency)}</span>
+                        <span>{t.jarCardExcessLabel.replace('{amount}', formatCurrency(jar.spent - jar.amount, currency))}</span>
                       </span>
                     </div>
                     {onAdjustExceededJar && (
@@ -453,7 +476,7 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
                         className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-black text-2xs rounded-lg transition-colors cursor-pointer shadow-2xs"
                       >
                         <Scale className="w-3 h-3" />
-                        <span>Ajustar siguientes frascos</span>
+                        <span>{t.jarAdjustNextBtn}</span>
                       </button>
                     )}
                   </div>
@@ -495,8 +518,8 @@ export const FiveJarsSection: React.FC<FiveJarsSectionProps> = ({
           <div className="flex items-center gap-2">
             <Scale className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <span>
-              Hay redistribuciones de presupuesto activas entre frascos
-              {lastAdjustmentLog?.transferredToNextMonth ? ' (incluye transferencia al próximo mes)' : ''}.
+              {t.jarActiveRedistributionsNotice}
+              {lastAdjustmentLog?.transferredToNextMonth ? ` ${t.jarActiveRedistributionsNextMonth}` : ''}.
             </span>
           </div>
           <button

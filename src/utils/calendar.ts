@@ -178,6 +178,41 @@ export function calculateMidMonthFixedExpenseJarAdjustments(
   return Object.keys(nextAdjustments).length > 0 ? nextAdjustments : undefined;
 }
 
+export function recalculateMonthFixedExpensesWithJarProtection(params: {
+  year: number;
+  month: number;
+  income: number;
+  savingsRate: number;
+  previousFixedExpenses: Array<{ amount?: number }>;
+  nextFixedExpenses: Array<{ amount?: number }>;
+  extraDaysPosition?: ExtraDaysPosition;
+  currentJarAdjustments?: Record<number, number>;
+  referenceDay?: number | null;
+}): Record<number, number> | undefined {
+  const monthIncome = Number(params.income) || 0;
+  const monthSavings = (monthIncome * (Number(params.savingsRate) || 0)) / 100;
+  const prevTotalFixed = (params.previousFixedExpenses || []).reduce(
+    (sum, item) => sum + (Number(item?.amount) || 0),
+    0
+  );
+  const nextTotalFixed = (params.nextFixedExpenses || []).reduce(
+    (sum, item) => sum + (Number(item?.amount) || 0),
+    0
+  );
+  const prevRemaining = Math.max(0, monthIncome - prevTotalFixed - monthSavings);
+  const nextRemaining = Math.max(0, monthIncome - nextTotalFixed - monthSavings);
+
+  return calculateMidMonthFixedExpenseJarAdjustments(
+    params.year,
+    params.month,
+    prevRemaining,
+    nextRemaining,
+    params.extraDaysPosition || 'end',
+    params.currentJarAdjustments,
+    params.referenceDay
+  );
+}
+
 /**
  * Calculates the exact 5-jar distribution requested by the user:
  * - El mes se divide en 5 frascos:
@@ -197,6 +232,10 @@ export function calculateFiveJars(
     noExtraDaysSubtitle?: string;
     daysCountSingular?: string;
     daysCountPlural?: string;
+    daysRangeTemplate?: string;
+    extraDaysFormula?: string;
+    weeklyJarFormula?: string;
+    noExtraDaysFormula?: string;
   },
   jarAdjustments?: Record<number, number>
 ): FiveJarsCalculation {
@@ -208,6 +247,13 @@ export function calculateFiveJars(
   const weeklyJarAmount = restAmount / 4;
 
   const noExtraDaysSubtitle = labels?.noExtraDaysSubtitle || 'Sin días extras (mes exacto de 28 días)';
+  const daysRangeTemplate = labels?.daysRangeTemplate || 'Días {start} al {end}';
+  const extraDaysFormulaTemplate = labels?.extraDaysFormula || '(Gastos Variables / {daysInMonth}) × {extraDays}';
+  const weeklyJarFormulaText = labels?.weeklyJarFormula || '(Gastos Variables - Días Extras) / 4';
+  const noExtraDaysFormulaText = labels?.noExtraDaysFormula || '0 (28 días)';
+
+  const formatDaysRange = (start: number, end: number) =>
+    daysRangeTemplate.replace('{start}', String(start)).replace('{end}', String(end));
 
   const helperFilterSpent = (startDay: number, endDay: number) => {
     if (startDay <= 0 || endDay <= 0) return 0;
@@ -233,14 +279,18 @@ export function calculateFiveJars(
       number: range.number,
       title: range.title,
       subtitle: range.isExtraDaysJar
-        ? (extraDays > 0 ? `Días ${range.startDay} al ${range.endDay}` : noExtraDaysSubtitle)
-        : `Días ${range.startDay} al ${range.endDay}`,
+        ? (extraDays > 0 ? formatDaysRange(range.startDay, range.endDay) : noExtraDaysSubtitle)
+        : formatDaysRange(range.startDay, range.endDay),
       startDay: range.startDay,
       endDay: range.endDay,
       daysCount: range.daysCount,
       formulaDescription: range.isExtraDaysJar
-        ? (extraDays > 0 ? `(Gastos Variables / ${daysInMonth}) × ${extraDays}` : '0 (28 días)')
-        : '(Gastos Variables - Días Extras) / 4',
+        ? (extraDays > 0
+            ? extraDaysFormulaTemplate
+                .replace('{daysInMonth}', String(daysInMonth))
+                .replace('{extraDays}', String(extraDays))
+            : noExtraDaysFormulaText)
+        : weeklyJarFormulaText,
       amount: effectiveAmount,
       spent,
       remaining: effectiveAmount - spent,
